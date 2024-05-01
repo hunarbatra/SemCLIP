@@ -1,14 +1,14 @@
 import torch
-import fire
+import argparse
 
 import torch.nn as nn
 
 from transformers import CLIPProcessor, CLIPModel, CLIPVisionConfig, CLIPImageProcessor
 from PIL import Image
 
-from svt_tokenization import preprocess_patches
-from svt_embeddings import CLIPVisionEmbeddings
-from image_utils import convert_patches_to_pixel_values
+from .semclip_tokenization import preprocess_patches
+from .semclip_embeddings import CLIPVisionEmbeddings
+from .image_utils import convert_patches_to_pixel_values
 
 
 # Load the CLIP model, processor and model config
@@ -48,8 +48,14 @@ def get_segments_embeddings(image_name: str, data_name: str):
     final_embedding = visual_projection(pooled_output)
     
     print(final_embedding.shape)
+    # print(final_embedding)
     
-    print(final_embedding)
+    return final_embedding
+
 
 if __name__ == "__main__":
-    fire.Fire(get_segments_embeddings)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("image_name", type=str, help="image file name")
+    parser.add_argument("data_name", type=str, help="data directory name")
+    args = parser.parse_args()
+    get_segments_embeddings(args.image_name, args.data_name)

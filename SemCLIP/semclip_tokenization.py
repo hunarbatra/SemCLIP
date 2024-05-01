@@ -9,7 +9,7 @@ import numpy as np
 from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 from PIL import Image
 
-from image_utils import normalize_bbox_coords
+from .image_utils import normalize_bbox_coords
 
 
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
