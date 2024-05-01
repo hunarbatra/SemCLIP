@@ -52,8 +52,8 @@ def get_segments_embeddings(image_name: str, data_name: str, projection_dim: Opt
     visual_projection = nn.Linear(vision_config.hidden_size, vision_config.projection_dim, bias=False)
     final_embedding = visual_projection(pooled_output)
     
-    print(final_embedding.shape)
-    # print(final_embedding)
+    # Detach the final embedding
+    final_embedding = final_embedding.detach()
     
     return final_embedding
 
