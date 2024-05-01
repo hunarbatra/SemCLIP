@@ -6,8 +6,8 @@ import torch.nn as nn
 from transformers import CLIPProcessor, CLIPModel, CLIPVisionConfig, CLIPImageProcessor
 from PIL import Image
 
-from sam_patches import preprocess_patches
-from patch_embeddings import CLIPVisionEmbeddings
+from svt_tokenization import preprocess_patches
+from svt_embeddings import CLIPVisionEmbeddings
 from image_utils import convert_patches_to_pixel_values
 
 
