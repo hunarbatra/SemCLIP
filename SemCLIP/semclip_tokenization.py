@@ -16,7 +16,7 @@ DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 MODEL_TYPE = "vit_h"
 
 sam = sam_model_registry[MODEL_TYPE](checkpoint='./sam-weights/sam_vit_h_4b8939.pth').to(device=DEVICE)
-
+sam = sam.to(device=DEVICE)
 
 def save_original_and_crops(original_image_path, cropped_images, segmented_image, save_path):
     """
