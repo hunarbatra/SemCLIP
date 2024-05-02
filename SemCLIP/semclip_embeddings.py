@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-class CLIPVisionEmbeddings(nn.Module):
+class SemCLIPVisionEmbeddings(nn.Module):
     def __init__(self, config, num_patches):
         super().__init__()
         self.config = config
@@ -19,7 +19,6 @@ class CLIPVisionEmbeddings(nn.Module):
 
         self.position_embedding = nn.Linear(4, self.embed_dim)  # 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
         self.class_position_embedding = nn.Parameter(torch.randn(1, self.embed_dim)) # Additional embedding for the class token that is prepended
-
 
     def forward(self, patch_list, bbox_coords):
         # process individual patch embeddings just like ViTs original implementation 
@@ -43,3 +42,49 @@ class CLIPVisionEmbeddings(nn.Module):
         embeddings += positional_embeddings
 
         return embeddings
+    
+    
+class SemCLIPTextEmbeddings(nn.Module):
+    def __init__(self, config, tokenizer):
+        super().__init__()
+        self.config = config
+        self.tokenizer = tokenizer
+        self.embed_dim = config.hidden_size
+        self.vocab_size = config.vocab_size
+        self.max_position_embeddings = config.max_position_embeddings
+
+        self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
+        self.position_embedding = nn.Linear(4, self.embed_dim)  # 4 for [x, y, w, h] - Positional embedding layer for token coordinates
+
+    def forward(self, input_ids):
+        seq_length = input_ids.shape[-1]
+        
+        token_embeddings = self.token_embedding(input_ids)
+
+        token_positions = self.get_token_positions(input_ids)
+        positional_embeddings = self.position_embedding(token_positions)
+
+        embeddings = token_embeddings + positional_embeddings
+
+        return embeddings
+
+    def get_token_positions(self, input_ids):
+        batch_size, seq_length = input_ids.shape
+        token_positions = []
+
+        for batch in input_ids:
+            token_pos = []
+            start_idx = 0
+            for token_id in batch:
+                token = self.tokenizer.convert_ids_to_tokens(token_id.item())
+                end_idx = start_idx + len(token)
+                x = start_idx / seq_length
+                y = end_idx / seq_length
+                w = len(token) / seq_length
+                h = len(token) / seq_length
+                token_pos.append([x, y, w, h])
+                start_idx = end_idx
+            token_positions.append(token_pos)
+
+        token_positions = torch.tensor(token_positions, dtype=torch.float32)
+        return token_positions
