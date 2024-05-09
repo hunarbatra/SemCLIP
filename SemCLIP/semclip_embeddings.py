@@ -79,7 +79,7 @@ class SemCLIPTextEmbeddings(nn.Module):
                 token = self.tokenizer.convert_ids_to_tokens(token_id.item())
                 end_idx = start_idx + len(token)
                 x = start_idx / seq_length
-                y = end_idx / seq_length
+                y = start_idx / seq_length
                 w = len(token) / seq_length
                 h = len(token) / seq_length
                 token_pos.append([x, y, w, h])
