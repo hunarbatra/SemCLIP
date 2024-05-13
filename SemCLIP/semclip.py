@@ -41,6 +41,7 @@ def get_segments_embeddings(image_name: str, data_name: str, pool_type: str = 'm
         output_embeddings = patch_embeddings(image_resized_patches, normalized_bbox_coords)
         
     # Apply pre-layer normalization
+    # additional layer normalization to the combined patch & post embeddings before the transformer (clip)
     hidden_states = model.vision_model.pre_layrnorm(output_embeddings)
 
     # Pass the normalized embeddings through the CLIP transformer encoder
@@ -53,13 +54,16 @@ def get_segments_embeddings(image_name: str, data_name: str, pool_type: str = 'm
 
     # Get the last hidden state and apply post-layer normalization
     last_hidden_state = encoder_outputs.last_hidden_state
-    pooled_output = last_hidden_state[:, 0, :] # pooled CLS states (CLS Pooling)
+    last_hidden_state = model.vision_model.post_layernorm(last_hidden_state) # post layer norm
+    
     if pool_type == 'cls':
         pooled_output = last_hidden_state[:, 0, :]
     elif pool_type == 'mean':
         pooled_output = last_hidden_state.mean(dim=1)
-        
-    pooled_output = model.vision_model.post_layernorm(pooled_output) # post-layer norm
+    elif pool_type == 'attention':
+        pooled_output = patch_embeddings.attn_pooling_head(last_hidden_state)
+    else:
+        raise ValueError(f"Invalid pooling type: {pool_type}")
 
     # Pass the pooled output through a final linear projection
     visual_projection = nn.Linear(vision_config.hidden_size, vision_config.projection_dim, bias=False)
@@ -70,7 +74,7 @@ def get_segments_embeddings(image_name: str, data_name: str, pool_type: str = 'm
     
     return final_embedding
 
-def get_text_embeddings(text: str, projection_dim: Optional[int] = None):
+def get_text_embeddings(text: str, pool_type: str = 'mean', projection_dim: Optional[int] = None):
     # Tokenize the input text
     inputs = tokenizer(text, return_tensors="pt")
     input_ids = inputs["input_ids"]
@@ -109,27 +113,30 @@ def get_text_embeddings(text: str, projection_dim: Optional[int] = None):
     last_hidden_state = encoder_outputs.last_hidden_state
     last_hidden_state = model.text_model.final_layer_norm(last_hidden_state)
 
-    if model.text_model.config.eos_token_id == 2:
-        # The `eos_token_id` was incorrect before PR #24773: Let's keep what have been done here.
-        # A CLIP model with such `eos_token_id` in the config can't work correctly with extra new tokens added
-        # ------------------------------------------------------------
-        # text_embeds.shape = [batch_size, sequence_length, transformer.width]
-        # take features from the eot embedding (eot_token is the highest number in each sequence)
-        # casting to torch.int for onnx compatibility: argmax doesn't support int64 inputs with opset 14
-        pooled_output = last_hidden_state[
-            torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
-            input_ids.to(dtype=torch.int, device=last_hidden_state.device).argmax(dim=-1),
-        ]
+    if pool_type == 'cls':
+        if model.text_model.config.eos_token_id == 2:
+            # The `eos_token_id` was incorrect before PR #24773: Let's keep what have been done here.
+            # A CLIP model with such `eos_token_id` in the config can't work correctly with extra new tokens added
+            pooled_output = last_hidden_state[
+                torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
+                input_ids.to(dtype=torch.int, device=last_hidden_state.device).argmax(dim=-1),
+            ]
+        else:
+            # The config gets updated `eos_token_id` from PR #24773 (so the use of exta new tokens is possible)
+            pooled_output = last_hidden_state[
+                torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
+                # We need to get the first position of `eos_token_id` value (`pad_token_ids` might equal to `eos_token_id`)
+                # Note: we assume each sequence (along batch dim.) contains an  `eos_token_id` (e.g. prepared by the tokenizer)
+                (input_ids.to(dtype=torch.int, device=last_hidden_state.device) == model.text_model.config.eos_token_id)
+                .int()
+                .argmax(dim=-1),
+            ]
+    elif pool_type == 'mean':
+        pooled_output = last_hidden_state.mean(dim=1)
+    elif pool_type == 'attention':
+        pooled_output = text_embeddings.attn_pooling_head(last_hidden_state)
     else:
-        # The config gets updated `eos_token_id` from PR #24773 (so the use of exta new tokens is possible)
-        pooled_output = last_hidden_state[
-            torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
-            # We need to get the first position of `eos_token_id` value (`pad_token_ids` might equal to `eos_token_id`)
-            # Note: we assume each sequence (along batch dim.) contains an  `eos_token_id` (e.g. prepared by the tokenizer)
-            (input_ids.to(dtype=torch.int, device=last_hidden_state.device) == model.text_model.config.eos_token_id)
-            .int()
-            .argmax(dim=-1),
-        ]
+        raise ValueError(f"Invalid pooling type: {pool_type}")
 
     # Pass the pooled output through a final linear projection
     text_projection = nn.Linear(text_config.hidden_size, text_config.projection_dim, bias=False)

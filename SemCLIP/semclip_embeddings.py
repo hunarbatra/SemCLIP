@@ -1,6 +1,44 @@
 import torch
 import torch.nn as nn
 
+from transformers.activations import ACT2FN
+
+
+class CLIPMLP(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.config = config
+        self.activation_fn = ACT2FN[config.hidden_act]
+        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
+        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.fc1(hidden_states)
+        hidden_states = self.activation_fn(hidden_states)
+        hidden_states = self.fc2(hidden_states)
+        return hidden_states
+
+class SemCLIPMultiheadAttentionPoolingHead(nn.Module):
+    """Multihead Attention Pooling for SemCLIP."""
+    def __init__(self, config):
+        super().__init__()
+        self.probe = nn.Parameter(torch.randn(1, 1, config.hidden_size))
+        self.attention = torch.nn.MultiheadAttention(config.hidden_size, config.num_attention_heads, batch_first=True)
+        self.layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.mlp = CLIPMLP(config)
+
+    def forward(self, hidden_state):
+        batch_size = hidden_state.shape[0]
+        probe = self.probe.repeat(batch_size, 1, 1)
+
+        hidden_state = self.attention(probe, hidden_state, hidden_state)[0]
+
+        residual = hidden_state
+        hidden_state = self.layernorm(hidden_state)
+        hidden_state = residual + self.mlp(hidden_state)
+
+        return hidden_state[:, 0]
+
 class SemCLIPVisionEmbeddings(nn.Module):
     def __init__(self, config, num_patches):
         super().__init__()
@@ -19,6 +57,8 @@ class SemCLIPVisionEmbeddings(nn.Module):
 
         self.position_embedding = nn.Linear(4, self.embed_dim)  # 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
         self.class_position_embedding = nn.Parameter(torch.randn(1, self.embed_dim)) # Additional embedding for the class token that is prepended
+        
+        self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
 
     def forward(self, patch_list, bbox_coords):
         # process individual patch embeddings just like ViTs original implementation 
@@ -55,6 +95,8 @@ class SemCLIPTextEmbeddings(nn.Module):
 
         self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
         self.position_embedding = nn.Linear(4, self.embed_dim)  # 4 for [x, y, w, h] - Positional embedding layer for token coordinates
+        
+        self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
 
     def forward(self, input_ids):
         seq_length = input_ids.shape[-1]
