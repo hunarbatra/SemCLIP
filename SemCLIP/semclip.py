@@ -1,3 +1,5 @@
+import os
+
 import torch
 import argparse
 
@@ -6,6 +8,8 @@ import torch.nn as nn
 from transformers import CLIPProcessor, CLIPModel, CLIPVisionConfig, CLIPImageProcessor, CLIPTextConfig, CLIPTokenizer
 from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
 
+from huggingface_hub import HfApi, Repository
+
 from PIL import Image
 
 from .semclip_tokenization import preprocess_patches
@@ -13,25 +17,31 @@ from .semclip_embeddings import SemCLIPVisionEmbeddings, SemCLIPTextEmbeddings
 from .image_utils import convert_patches_to_pixel_values, DEVICE
 
 from typing import Optional
+from dotenv import load_dotenv
+
+
+load_dotenv()
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 
 class SemCLIP:
-    def __init__(self, model_name="openai/clip-vit-base-patch32", device=DEVICE):
+    def __init__(self, model_name="openai/clip-vit-base-patch32", pool_type: str = 'attention', projection_dim: Optional[int] = None, device=DEVICE):
         self.device = device
-        self.model = CLIPModel.from_pretrained(model_name).to(device)
+        self.model = CLIPModel.from_pretrained(model_name, token=HF_TOKEN).to(device)
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.patch_processor = CLIPImageProcessor(do_resize=False, do_center_crop=False)  # disable image resizing and center cropping
         self.vision_config = CLIPVisionConfig.from_pretrained(model_name)
         self.text_config = CLIPTextConfig.from_pretrained(model_name)
+        self.pool_type = pool_type
         
-    def get_segment_embeddings(self, image_name: str, data_name: str, pool_type: str = 'mean', projection_dim: Optional[int] = None):
+        if projection_dim is not None:  # custom projection dim, default is 512
+            self.vision_config.projection_dim = projection_dim
+        
+    def get_segment_embeddings(self, image_name: str, data_name: str):
         # Load image segments patches
         image_resized_patches, normalized_bbox_coords = preprocess_patches(image_name, data_name)
         image_resized_patches = convert_patches_to_pixel_values(image_resized_patches, patch_size=self.vision_config.patch_size, patch_processor=self.patch_processor)
-
-        if projection_dim is not None:  # custom projection dim, default is 512
-            self.vision_config.projection_dim = projection_dim
             
         # Pass image patches through custom CLIPVisionEmbeddings module
         patch_embeddings = SemCLIPVisionEmbeddings(self.vision_config, len(image_resized_patches)).to(self.device)
@@ -54,11 +64,11 @@ class SemCLIP:
         last_hidden_state = encoder_outputs.last_hidden_state
         last_hidden_state = self.model.vision_model.post_layernorm(last_hidden_state)  # post layer norm
         
-        if pool_type == 'cls':
+        if self.pool_type == 'cls':
             pooled_output = last_hidden_state[:, 0, :]
-        elif pool_type == 'mean':
+        elif self.pool_type == 'mean':
             pooled_output = last_hidden_state.mean(dim=1)
-        elif pool_type == 'attention':
+        elif self.pool_type == 'attention':
             pooled_output = patch_embeddings.attn_pooling_head(last_hidden_state)
         else:
             raise ValueError(f"Invalid pooling type: {pool_type}")
@@ -72,14 +82,11 @@ class SemCLIP:
         
         return final_embedding
     
-    def get_text_embeddings(self, text: str, pool_type: str = 'mean', projection_dim: Optional[int] = None):
+    def get_text_embeddings(self, text: str):
         # Tokenize the input text
         inputs = self.tokenizer(text, return_tensors="pt").to(self.device)
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
-        
-        if projection_dim is not None:
-            self.text_config.projection_dim = projection_dim  # custom projection dim, default is 512
             
         # Pass input_ids through custom SemCLIPTextEmbeddings module
         text_embeddings = SemCLIPTextEmbeddings(self.text_config, self.tokenizer).to(self.device)
@@ -111,7 +118,7 @@ class SemCLIP:
         last_hidden_state = encoder_outputs.last_hidden_state
         last_hidden_state = self.model.text_model.final_layer_norm(last_hidden_state)
         
-        if pool_type == 'cls':
+        if self.pool_type == 'cls':
             if self.model.text_model.config.eos_token_id == 2:
                 # The `eos_token_id` was incorrect before PR #24773: Let's keep what have been done here.
                 # A CLIP model with such `eos_token_id` in the config can't work correctly with extra new tokens added
@@ -129,9 +136,9 @@ class SemCLIP:
                     .int()
                     .argmax(dim=-1),
                 ]
-        elif pool_type == 'mean':
+        elif self.pool_type == 'mean':
             pooled_output = last_hidden_state.mean(dim=1)
-        elif pool_type == 'attention':
+        elif self.pool_type == 'attention':
             pooled_output = text_embeddings.attn_pooling_head(last_hidden_state)
         else:
             raise ValueError(f"Invalid pooling type: {pool_type}")
@@ -144,16 +151,59 @@ class SemCLIP:
         final_embedding = final_embedding.detach()
         
         return final_embedding
+    
+    def get_semclip_embeddings(self, images, captions, images_folder):
+        image_embeddings = []
+        text_embeddings = []
+
+        for image, caption in zip(images, captions):
+            # Assuming get_segment_embeddings and get_text_embeddings expect a single input
+            image_embedding = self.get_segment_embeddings(image_name=image, data_name=images_folder)
+            text_embedding = self.get_text_embeddings(text=caption)
+
+            image_embeddings.append(image_embedding)
+            text_embeddings.append(text_embedding)
+
+        image_embeddings = torch.stack(image_embeddings)
+        text_embeddings = torch.stack(text_embeddings)
+
+        return image_embeddings, text_embeddings
+    
+    def upload_model_to_hf_hub(self, model_name: str, hf_name: str):
+        api = HfApi()
+
+        repo_exists = api.repo_exists(repo_id=f"{hf_name}/{model_name}", token=HF_TOKEN)
+        
+        print(f"Repository exists: {repo_exists}")
+
+        if repo_exists:
+            # Clone the existing repository to a local directory
+            repo = Repository(local_dir=model_name, clone_from=f"https://huggingface.co/{hf_name}/{model_name}", token=HF_TOKEN)
+            commit_message = "Update model files"
+        else:
+            # Create a new repository
+            repo_url = api.create_repo(repo_id=model_name, token=HF_TOKEN, private=True)
+            # Clone the new repository to a local directory
+            repo = Repository(local_dir=model_name, clone_from=repo_url, use_auth_token=HF_TOKEN)
+            commit_message = "Add model files"
+
+        self.model.save_pretrained(model_name)
+        self.tokenizer.save_pretrained(model_name)
+        self.processor.save_pretrained(model_name)
+        
+        # Push the files to the repository
+        repo.push_to_hub(commit_message=commit_message)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--image_name", type=str, help="image file name")
     parser.add_argument("--data_name", type=str, help="data directory name")
-    parser.add_argument("pool_type", type=str, default="mean", help="pooling type; options: ['mean', 'cls', 'attention'], default: mean")
+    parser.add_argument("--pool_type", type=str, default="mean", help="pooling type; options: ['mean', 'cls', 'attention'], default: 'attention'")
     parser.add_argument("--projection_dim", type=int, default=None, help="custom projection dimension, default: 512")
     parser.add_argument("--model_name", type=str, default="openai/clip-vit-base-patch32", help="CLIP model name, default: openai/clip-vit-base-patch32")
     args = parser.parse_args()
     
-    semclip = SemCLIP(model_name=args.model_name, device=DEVICE)
-    semclip.get_segments_embeddings(args.image_name, args.data_name, args.projection_dim)
+    semclip = SemCLIP(model_name=args.model_name, pool_type=args.pool_type, projection_dim=args.projection_dim, device=DEVICE)
+    semclip.get_segment_embeddings(args.image_name, args.data_name)
+    
