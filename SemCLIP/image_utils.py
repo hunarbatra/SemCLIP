@@ -1,5 +1,7 @@
 import torch
 
+import numpy as np
+
 from transformers import CLIPImageProcessor
 from PIL import Image
 from typing import List
@@ -31,4 +33,14 @@ def convert_patches_to_pixel_values(patches: List[Image.Image], patch_size: int 
         image_resized_patches.append(inputs['pixel_values'])
     
     return image_resized_patches
+
+def create_batches(dataset, batch_size):
+    for i in range(0, len(dataset), batch_size):
+        yield dataset[i:i + batch_size]
+
+def pil_to_cv2(pil_image):
+    open_cv_image = np.array(pil_image)
+    # Convert RGB to BGR
+    open_cv_image = open_cv_image[:, :, ::-1].copy()
+    return open_cv_image
         
