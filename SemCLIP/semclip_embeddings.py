@@ -3,6 +3,8 @@ import torch.nn as nn
 
 from transformers.activations import ACT2FN
 
+from SemCLIP.image_utils import DEVICE
+
 
 class CLIPMLP(nn.Module):
     def __init__(self, config):
@@ -61,6 +63,10 @@ class SemCLIPVisionEmbeddings(nn.Module):
         self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
 
     def forward(self, patch_list, bbox_coords):
+        # Ensure patch_list is on the correct device
+        patch_list = [patch.to(self.patch_embedding.weight.device) for patch in patch_list]
+        bbox_coords = bbox_coords.to(self.patch_embedding.weight.device)
+
         # process individual patch embeddings just like ViTs original implementation 
         patch_embeds_list = []
         for patch in patch_list: 
@@ -101,9 +107,9 @@ class SemCLIPTextEmbeddings(nn.Module):
     def forward(self, input_ids):
         seq_length = input_ids.shape[-1]
         
-        token_embeddings = self.token_embedding(input_ids)
+        token_embeddings = self.token_embedding(input_ids.to(DEVICE))
 
-        token_positions = self.get_token_positions(input_ids)
+        token_positions = self.get_token_positions(input_ids).to(DEVICE)
         positional_embeddings = self.position_embedding(token_positions)
 
         embeddings = token_embeddings + positional_embeddings
@@ -130,3 +136,4 @@ class SemCLIPTextEmbeddings(nn.Module):
 
         token_positions = torch.tensor(token_positions, dtype=torch.float32)
         return token_positions
+        
