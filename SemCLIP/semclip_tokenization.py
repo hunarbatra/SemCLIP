@@ -17,7 +17,7 @@ from typing import Optional
 sam = sam_model_registry["vit_h"](checkpoint='./sam-weights/sam_vit_h_4b8939.pth').to(device=DEVICE)
 sam = sam.to(device=DEVICE)
 
-def save_original_and_crops(original_image_path, cropped_images, segmented_image, save_path):
+def save_original_and_crops(original_image_path, cropped_images, segmented_image, save_path, image_file: Optional[np.ndarray] = None):
     """
     Plots the original image and all cropped images with transparent backgrounds in a grid.
 
@@ -26,9 +26,12 @@ def save_original_and_crops(original_image_path, cropped_images, segmented_image
     - cropped_images (List[np.ndarray]): List of cropped images with transparent backgrounds as numpy arrays.
     """
     # Load and convert the original image to RGB
-    original_image = cv2.imread(original_image_path)
+    if image_file is None:
+        original_image = cv2.imread(original_image_path)
+    else:
+        original_image = image_file
+        
     original_image = cv2.cvtColor(original_image, cv2.COLOR_BGR2RGB)
-
     segmented_image_rgb = cv2.cvtColor(segmented_image, cv2.COLOR_BGR2RGB)
 
     # Determine grid size for plotting
