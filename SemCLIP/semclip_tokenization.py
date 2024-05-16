@@ -6,6 +6,8 @@ import supervision as sv
 import matplotlib.pyplot as plt
 import numpy as np
 
+from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+
 from .image_utils import normalize_bbox_coords, DEVICE
 
 from PIL import Image
