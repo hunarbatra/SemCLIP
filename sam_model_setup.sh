@@ -3,8 +3,9 @@
 HOME=$(pwd)
 echo "HOME: $HOME"
 
+pip3 install -r requirements.txt
+
 pip3 install -q 'git+https://github.com/facebookresearch/segment-anything.git'
-pip3 install -q jupyter_bbox_widget roboflow dataclasses-json supervision
 
 # directory for weights + download SAM model weights
 mkdir -p ${HOME}/sam-weights
