@@ -165,8 +165,8 @@ class SemCLIP:
             image_embeddings.append(image_embedding)
             text_embeddings.append(text_embedding)
 
-        image_embeddings = torch.stack(image_embeddings)
-        text_embeddings = torch.stack(text_embeddings)
+        image_embeddings = torch.cat(image_embeddings, dim=0)
+        text_embeddings = torch.cat(text_embeddings, dim=0)
 
         return image_embeddings, text_embeddings
     
@@ -174,16 +174,20 @@ class SemCLIP:
         image_embeddings = []
         text_embeddings = []
 
+        ctr = 0
+
         for image, caption in zip(images, captions):
+            print(ctr)
+            ctr += 1
             # Assuming get_segment_embeddings and get_text_embeddings expect a single input
-            image_embedding = self.get_segment_embeddings(image_name=None, data_name=None,image_file=image)
+            image_embedding = self.get_segment_embeddings(image_name=None, data_name=None, image_file=image)
             text_embedding = self.get_text_embeddings(text=caption)
 
             image_embeddings.append(image_embedding)
             text_embeddings.append(text_embedding)
 
-        image_embeddings = torch.stack(image_embeddings)
-        text_embeddings = torch.stack(text_embeddings)
+        image_embeddings = torch.cat(image_embeddings, dim=0)
+        text_embeddings = torch.cat(text_embeddings, dim=0)
 
         return image_embeddings, text_embeddings
     
