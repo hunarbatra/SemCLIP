@@ -4,6 +4,7 @@ import torch
 import argparse
 
 import torch.nn as nn
+import numpy as np
 
 from transformers import CLIPProcessor, CLIPModel, CLIPVisionConfig, CLIPImageProcessor, CLIPTextConfig, CLIPTokenizer
 from transformers.modeling_attn_mask_utils import _create_4d_causal_attention_mask, _prepare_4d_attention_mask
@@ -38,9 +39,9 @@ class SemCLIP:
         if projection_dim is not None:  # custom projection dim, default is 512
             self.vision_config.projection_dim = projection_dim
         
-    def get_segment_embeddings(self, image_name: str, data_name: str):
+    def get_segment_embeddings(self, image_name: str, data_name: str, image_file: Optional[np.ndarray] = None):
         # Load image segments patches
-        image_resized_patches, normalized_bbox_coords = preprocess_patches(image_name, data_name)
+        image_resized_patches, normalized_bbox_coords = preprocess_patches(image_name, data_name, image_file=image_file)
         image_resized_patches = convert_patches_to_pixel_values(image_resized_patches, patch_size=self.vision_config.patch_size, patch_processor=self.patch_processor)
             
         # Pass image patches through custom CLIPVisionEmbeddings module
@@ -159,6 +160,23 @@ class SemCLIP:
         for image, caption in zip(images, captions):
             # Assuming get_segment_embeddings and get_text_embeddings expect a single input
             image_embedding = self.get_segment_embeddings(image_name=image, data_name=images_folder)
+            text_embedding = self.get_text_embeddings(text=caption)
+
+            image_embeddings.append(image_embedding)
+            text_embeddings.append(text_embedding)
+
+        image_embeddings = torch.stack(image_embeddings)
+        text_embeddings = torch.stack(text_embeddings)
+
+        return image_embeddings, text_embeddings
+    
+    def get_semclip_embeddings_direct_img(self, images, captions):
+        image_embeddings = []
+        text_embeddings = []
+
+        for image, caption in zip(images, captions):
+            # Assuming get_segment_embeddings and get_text_embeddings expect a single input
+            image_embedding = self.get_segment_embeddings(image_name=None, data_name=None,image_file=image)
             text_embedding = self.get_text_embeddings(text=caption)
 
             image_embeddings.append(image_embedding)

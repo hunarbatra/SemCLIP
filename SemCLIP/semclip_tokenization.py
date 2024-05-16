@@ -6,10 +6,10 @@ import supervision as sv
 import matplotlib.pyplot as plt
 import numpy as np
 
-from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
-from PIL import Image
-
 from .image_utils import normalize_bbox_coords, DEVICE
+
+from PIL import Image
+from typing import Optional
 
 
 sam = sam_model_registry["vit_h"](checkpoint='./sam-weights/sam_vit_h_4b8939.pth').to(device=DEVICE)
@@ -64,7 +64,7 @@ def save_original_and_crops(original_image_path, cropped_images, segmented_image
     plt.savefig(save_path)
     plt.show()
 
-def generate_crops_from_detections(image_path, detections, annotated_image, save_crops=False):
+def generate_crops_from_detections(image_path, detections, annotated_image, save_crops=False, image_bgr: Optional[np.ndarray] = None):
     """
     Generates square crops from detections with transparent backgrounds and saves them.
 
@@ -75,16 +75,24 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
     Returns:
     - List of numpy arrays of the cropped images.
     """
-    save_data_name = image_path.split('/')[-2]
-    save_img_name = f"{image_path.split('/')[-1].split('.')[0]}_crops.png"
-    save_path = f"data/{save_data_name}/{save_img_name}"
+    save_data_name = None
+    save_img_name = None
+    save_path = None
 
-    # Load the original image in BGRA mode (to handle the alpha channel)
-    image = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-    h, w = image.shape[:2]
+    if image_path is not None:
+        save_data_name = image_path.split('/')[-2]
+        save_img_name = f"{image_path.split('/')[-1].split('.')[0]}_crops.png"
+        save_path = f"data/{save_data_name}/{save_img_name}"
 
-    if image.shape[2] == 3:  # Convert BGR to BGRA if necessary
-        image = cv2.cvtColor(image, cv2.COLOR_BGR2BGRA)
+        # Load the original image in BGRA mode (to handle the alpha channel)
+        image_bgr = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+
+    h, w = image_bgr.shape[:2]
+
+    if image_bgr.shape[2] == 3:  # Convert BGR to BGRA if necessary
+        image = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2BGRA)
+    else:
+        image = image_bgr.copy()
 
     cropped_images = []
 
@@ -124,14 +132,18 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
 
         cropped_images.append(square_crop)
         
-    if save_crops:
+    if save_crops and save_path is not None:
         save_original_and_crops(image_path, cropped_images, annotated_image, save_path)
 
     return cropped_images
 
-def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False):
-    image_path = f"data/{data_name}/{image_name}"
-    image_bgr = cv2.imread(image_path)
+def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False, image_file: Optional[np.ndarray] = None):
+    if image_file is None:
+        image_path = f"data/{data_name}/{image_name}"
+        image_bgr = cv2.imread(image_path)
+    else:
+        image_bgr = image_file
+        
     image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
 
     # SAM automated mask generation
@@ -148,7 +160,11 @@ def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False
     annotated_image = mask_annotator.annotate(scene=image_bgr.copy(), detections=detections)
     
     # Generate crops from detections and save them
-    cropped_images_detection = generate_crops_from_detections(image_path, detections, annotated_image, save_crops)
+    if image_file is None:
+        cropped_images_detection = generate_crops_from_detections(image_path, detections, annotated_image, save_crops)
+    else:
+        cropped_images_detection = generate_crops_from_detections(image_path=None, detections=detections, annotated_image=annotated_image, save_crops=save_crops, image_bgr=image_file)
+    
     cropped_images_detection = [Image.fromarray(crop) for crop in cropped_images_detection]
     
     return cropped_images_detection, normalized_bbox_coords
