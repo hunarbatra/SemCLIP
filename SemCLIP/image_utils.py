@@ -1,3 +1,4 @@
+import cv2
 import torch
 
 import numpy as np
@@ -40,7 +41,8 @@ def create_batches(dataset, batch_size):
 
 def pil_to_cv2(pil_image):
     open_cv_image = np.array(pil_image)
-    # Convert RGB to BGR
-    open_cv_image = open_cv_image[:, :, ::-1].copy()
+    if len(open_cv_image.shape) == 2:  # Grayscale image
+        open_cv_image = cv2.cvtColor(open_cv_image, cv2.COLOR_GRAY2BGR)
+    else:  # RGB image
+        open_cv_image = open_cv_image[:, :, ::-1].copy()  # Convert RGB to BGR
     return open_cv_image
-        
