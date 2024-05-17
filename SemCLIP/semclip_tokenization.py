@@ -102,7 +102,7 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
     cropped_images = []
 
     for i, (bbox, mask) in enumerate(zip(detections.xyxy, detections.mask)):
-        x1, y1, x2, y2 = bbox
+        x1, y1, x2, y2 = map(int, bbox)
         crop_width = x2 - x1
         crop_height = y2 - y1
 
