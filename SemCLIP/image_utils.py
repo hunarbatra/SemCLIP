@@ -4,6 +4,7 @@ import torch
 import numpy as np
 
 from transformers import CLIPImageProcessor
+from datasets import Dataset
 from PIL import Image
 from typing import List
 
@@ -36,7 +37,7 @@ def convert_patches_to_pixel_values(patches: List[Image.Image], patch_size: int 
     return image_resized_patches
 
 def create_batches(dataset, batch_size):
-    random.shuffle(dataset)
+    dataset = dataset.shuffle(seed=42)
     
     for i in range(0, len(dataset), batch_size):
         yield dataset[i:i + batch_size]
