@@ -100,14 +100,16 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
         image = image_bgr.copy()
 
     cropped_images = []
+    remove_bbox = []
 
     for i, (bbox, mask) in enumerate(zip(detections.xyxy, detections.mask)):
-        x1, y1, x2, y2 = map(int, bbox)
+        x1, y1, x2, y2 = map(int, bbox) # detection.xyxy returns x1, y1, x2, y2 coords
         crop_width = x2 - x1
         crop_height = y2 - y1
 
         # Skip zero-width or zero-height crops
         if crop_width <= 0 or crop_height <= 0:
+            remove_bbox.append(i) # store index of bbox to remove from pos embeddings
             continue
 
         # Crop the segment
@@ -143,8 +145,10 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
         
     if save_crops and save_path is not None:
         save_original_and_crops(image_path, cropped_images, annotated_image, save_path)
+    # else: # for testing
+    #     save_original_and_crops(original_image_path=None, cropped_images=cropped_images, segmented_image=annotated_image, save_path='./test_crops.png', image_file=image_bgr)
 
-    return cropped_images
+    return cropped_images, remove_bbox
 
 def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False, image_file: Optional[np.ndarray] = None):
     if image_file is None:
@@ -159,10 +163,6 @@ def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False
     mask_generator = SamAutomaticMaskGenerator(sam)
     sam_result = mask_generator.generate(image_rgb)
     
-    # Extract bounding boxes coordinates for positional embeddings from the SAM result
-    bboxes = [mask['bbox'] for mask in sam_result]
-    normalized_bbox_coords = normalize_bbox_coords(bboxes, image_bgr) # tensor
-    
     # Annotate the image with the detections
     mask_annotator = sv.MaskAnnotator(color_lookup=sv.ColorLookup.INDEX)
     detections = sv.Detections.from_sam(sam_result=sam_result)
@@ -170,12 +170,18 @@ def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False
     
     # Generate crops from detections and save them
     if image_file is None:
-        cropped_images_detection = generate_crops_from_detections(image_path, detections, annotated_image, save_crops)
+        cropped_images_detection, remove_bbox = generate_crops_from_detections(image_path, detections, annotated_image, save_crops)
     else:
-        cropped_images_detection = generate_crops_from_detections(image_path=None, detections=detections, annotated_image=annotated_image, save_crops=save_crops, image_bgr=image_file)
+        cropped_images_detection, remove_bbox = generate_crops_from_detections(image_path=None, detections=detections, annotated_image=annotated_image, save_crops=save_crops, image_bgr=image_file)
     
     cropped_images_detection = [Image.fromarray(crop) for crop in cropped_images_detection]
     
+    # Extract bounding boxes coordinates for positional embeddings from the SAM result
+    bboxes = [mask['bbox'] for mask in sam_result] # x1, y1, w, h
+    if len(remove_bbox) > 0: # remove bboxes that have zero width or height
+        bboxes = [bbox for i, bbox in enumerate(bboxes) if i not in remove_bbox]
+    normalized_bbox_coords = normalize_bbox_coords(bboxes, image_bgr) # tensor
+
     return cropped_images_detection, normalized_bbox_coords
 
     
