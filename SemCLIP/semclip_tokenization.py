@@ -106,6 +106,10 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
         crop_width = x2 - x1
         crop_height = y2 - y1
 
+        # Skip zero-width or zero-height crops
+        if crop_width <= 0 or crop_height <= 0:
+            continue
+
         # Crop the segment
         segment_crop = image[y1:y2, x1:x2]
 
