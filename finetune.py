@@ -14,15 +14,15 @@ from datasets import load_dataset
 from SemCLIP.semclip import SemCLIP
 from SemCLIP.image_utils import DEVICE, create_batches, pil_to_cv2
 from SemCLIP.model_utils import convert_models_to_fp32, convert_models_to_fp16
-from config import dataset_config as data_mapper
+from config import dataset_mapper
 
 
-def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention', projection_dim=512, dataset_config='COCO-13k', resume_training=False, train_name='semclip-v1', batch_size=64, num_epochs=3):
+def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention', projection_dim=512, data='COCO-13k', resume_training=False, train_name='semclip-v1', batch_size=64, num_epochs=3):
     # Initialize SemCLIP
     semclip = SemCLIP(model_name=base_model, pool_type='attention', projection_dim=512, device=DEVICE)
     
     # Load dataset
-    dataset = load_dataset(data_mapper[dataset_config])
+    dataset = load_dataset(dataset_mapper[data])
     
     wandb.login(key=os.getenv("WANDB_API_KEY"))
 
@@ -48,7 +48,7 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
 
     optimizer = torch.optim.AdamW(semclip.model.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
 
-    loss = torch.nn.CrossEntropyLoss()
+    loss_fn = torch.nn.CrossEntropyLoss()
 
     train_loader = create_batches(dataset['train'], batch_size)
 
@@ -97,17 +97,20 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
 
             # Forward pass through the model
             try:
-                logits_per_image, logits_per_text = semclip.get_semclip_embeddings_direct_img(images=image_batch_cv2, captions=text_batch)
+                image_embeddings, text_embeddings = semclip.get_semclip_embeddings_direct_img(images=image_batch_cv2, captions=text_batch)
             except Exception as e:
                 print(f"error: {e}; images batch being processed: {batch['image']}")
                 continue
+            
+            # Process final embeddings (normalize, compute logits)
+            logits_per_image, logits_per_text = semclip.process_final_embeddings(image_embeddings, text_embeddings)
                 
             # Compute the loss
             ground_truth = torch.arange(batch_size).to(DEVICE)
-            logits_per_image.requires_grad_()
-            logits_per_text.requires_grad_()
-            total_loss = (loss(logits_per_image, ground_truth) + loss(logits_per_text, ground_truth)) / 2
-
+            text_loss = loss_fn(logits_per_text, ground_truth) # contrastive loss
+            image_loss = loss_fn(logits_per_text.t(), ground_truth) # contrastive loss
+            total_loss = (text_loss + image_loss) / 2.0
+                
             # Backward pass
             total_loss.backward()
             
@@ -141,7 +144,7 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train SemCLIP model")
-    parser.add_argument('--dataset_config', type=str, default='COCO-13k', help='Dataset configuration')
+    parser.add_argument('--data', type=str, default='COCO-13k', help='Dataset name, default: COCO-13k - check config.py for more dataset options or to add more datasets')
     parser.add_argument('--resume_training', action='store_true', help='Resume training from checkpoint')
     parser.add_argument('--train_name', type=str, default='semclip-v1', help='Training name for checkpointing and wandb')
     parser.add_argument('--base_model', type=str, default='openai/clip-vit-base-patch32', help='Base model for SemCLIP')
@@ -156,7 +159,7 @@ if __name__ == "__main__":
         base_model=args.base_model, 
         pool_type=args.pool_type,
         projection_dim=args.projection_dim,
-        dataset_config=args.dataset_config,
+        data=args.data,
         resume_training=args.resume_training,
         train_name=args.train_name,
         batch_size=args.batch_size,

@@ -38,6 +38,11 @@ class SemCLIP:
         
         if projection_dim is not None:  # custom projection dim, default is 512
             self.vision_config.projection_dim = projection_dim
+            
+        # Projection layers
+        self.visual_projection = nn.Linear(self.vision_config.hidden_size, self.vision_config.projection_dim, bias=False).to(self.device)
+        self.text_projection = nn.Linear(self.text_config.hidden_size, self.text_config.projection_dim, bias=False).to(self.device)
+        self.logit_scale = nn.Parameter(torch.tensor(self.model.config.logit_scale_init_value)).to(self.device)
         
     def get_segment_embeddings(self, image_name: str, data_name: str, image_file: Optional[np.ndarray] = None):
         # Load image segments patches
@@ -61,9 +66,8 @@ class SemCLIP:
             return_dict=True,
         )
         
-        # Get the last hidden state and apply post-layer normalization
+        # Get the last hidden state, apply pooling and apply post-layer normalization
         last_hidden_state = encoder_outputs.last_hidden_state
-        last_hidden_state = self.model.vision_model.post_layernorm(last_hidden_state)  # post layer norm
         
         if self.pool_type == 'cls':
             pooled_output = last_hidden_state[:, 0, :]
@@ -74,9 +78,10 @@ class SemCLIP:
         else:
             raise ValueError(f"Invalid pooling type: {pool_type}")
         
+        pooled_output = self.model.vision_model.post_layernorm(pooled_output)  # post layer norm
+        
         # Pass the pooled output through a final linear projection
-        visual_projection = nn.Linear(self.vision_config.hidden_size, self.vision_config.projection_dim, bias=False).to(self.device)
-        final_embedding = visual_projection(pooled_output)
+        final_embedding = self.visual_projection(pooled_output)
         
         # Detach the final embedding
         final_embedding = final_embedding.detach()
@@ -115,9 +120,8 @@ class SemCLIP:
             return_dict=True,
         )
         
-        # Get the last hidden state and apply final layer normalization
+        # Get the last hidden state, apply pooling and apply final layer normalization
         last_hidden_state = encoder_outputs.last_hidden_state
-        last_hidden_state = self.model.text_model.final_layer_norm(last_hidden_state)
         
         if self.pool_type == 'cls':
             if self.model.text_model.config.eos_token_id == 2:
@@ -144,9 +148,10 @@ class SemCLIP:
         else:
             raise ValueError(f"Invalid pooling type: {pool_type}")
         
+        pooled_output = self.model.text_model.final_layer_norm(pooled_output)
+        
         # Pass the pooled output through a final linear projection
-        text_projection = nn.Linear(self.text_config.hidden_size, self.text_config.projection_dim, bias=False).to(self.device)
-        final_embedding = text_projection(pooled_output)
+        final_embedding = self.text_projection(pooled_output)
         
         # Detach the final embedding
         final_embedding = final_embedding.detach()
@@ -190,6 +195,18 @@ class SemCLIP:
         text_embeddings = torch.cat(text_embeddings, dim=0)
 
         return image_embeddings, text_embeddings
+    
+    def process_final_embeddings(self, image_embeddings, text_embeddings):
+        # Apply L2 normalization
+        image_embeddings = image_embeddings / image_embeddings.norm(p=2, dim=-1, keepdim=True)
+        text_embeddings = text_embeddings / text_embeddings.norm(p=2, dim=-1, keepdim=True)
+
+        # Compute cosine similarity as logits
+        logit_scale = self.logit_scale.exp()
+        logits_per_text = torch.matmul(text_embeddings, image_embeddings.t()) * logit_scale
+        logits_per_image = logits_per_text.t()
+
+        return logits_per_image, logits_per_text
     
     def upload_model_to_hf_hub(self, model_name: str, hf_name: str):
         api = HfApi()
