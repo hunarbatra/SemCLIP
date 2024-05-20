@@ -18,3 +18,4 @@ supervision
 jupyter_bbox_widget
 roboflow 
 dataclasses-json 
+wandb
