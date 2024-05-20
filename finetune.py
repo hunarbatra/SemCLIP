@@ -17,7 +17,7 @@ from SemCLIP.model_utils import convert_models_to_fp32, convert_models_to_fp16
 from config import dataset_config as data_mapper
 
 
-def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention', projection_dim=512, dataset_config='COCO-13k', resume_training=False, train_name='semclip-v1'):
+def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention', projection_dim=512, dataset_config='COCO-13k', resume_training=False, train_name='semclip-v1', batch_size=64):
     # Initialize SemCLIP
     semclip = SemCLIP(model_name=base_model, pool_type='attention', projection_dim=512, device=DEVICE)
     
@@ -148,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--base_model', type=str, default='openai/clip-vit-base-patch32', help='Base model for SemCLIP')
     parser.add_argument('--pool_type', type=str, default='attention', help='Pooling type for SemCLIP; options: "mean", "cls", "attention"')
     parser.add_argument('--projection_dim', type=int, default=512, help='Projection dimension for SemCLIP')
+    parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
     
     args = parser.parse_args()
     
@@ -157,5 +158,6 @@ if __name__ == "__main__":
         projection_dim=args.projection_dim,
         dataset_config=args.dataset_config,
         resume_training=args.resume_training,
-        train_name=args.train_name
+        train_name=args.train_name,
+        batch_size=args.batch_size
     )
