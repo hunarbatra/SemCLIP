@@ -33,7 +33,6 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
     epsilon = 1e-6 # huggingface trainer default epsilon
     weight_decay = 0.2 # L2 regularization - finetuning CLIP with a small dataset can lead to overfitting so we add L2 regularization
     num_epochs = 1 # note: huggingface trainer default num_train_epochs = 3
-    batch_size = 1
 
     wandb_config = {
         "learning_rate": learning_rate,
