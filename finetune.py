@@ -17,7 +17,7 @@ from SemCLIP.model_utils import convert_models_to_fp32, convert_models_to_fp16
 from config import dataset_config as data_mapper
 
 
-def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention', projection_dim=512, dataset_config='COCO-13k', resume_training=False, train_name='semclip-v1', batch_size=64):
+def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention', projection_dim=512, dataset_config='COCO-13k', resume_training=False, train_name='semclip-v1', batch_size=64, num_epochs=3):
     # Initialize SemCLIP
     semclip = SemCLIP(model_name=base_model, pool_type='attention', projection_dim=512, device=DEVICE)
     
@@ -32,7 +32,7 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
     betas = (0.9, 0.999) # huggingface trainer default betas
     epsilon = 1e-6 # huggingface trainer default epsilon
     weight_decay = 0.2 # L2 regularization - finetuning CLIP with a small dataset can lead to overfitting so we add L2 regularization
-    num_epochs = 1 # note: huggingface trainer default num_train_epochs = 3
+    # try setting weight_decay to 0.001 (ref: https://github.com/openai/CLIP/issues/150#issuecomment-976076317)
 
     wandb_config = {
         "learning_rate": learning_rate,
@@ -148,6 +148,7 @@ if __name__ == "__main__":
     parser.add_argument('--pool_type', type=str, default='attention', help='Pooling type for SemCLIP; options: "mean", "cls", "attention"')
     parser.add_argument('--projection_dim', type=int, default=512, help='Projection dimension for SemCLIP')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
+    parser.add_argument('--num_epochs', type=int, default=3, help='Number of epochs for training') # note: huggingface trainer default num_train_epochs = 3
     
     args = parser.parse_args()
     
@@ -158,5 +159,6 @@ if __name__ == "__main__":
         dataset_config=args.dataset_config,
         resume_training=args.resume_training,
         train_name=args.train_name,
-        batch_size=args.batch_size
+        batch_size=args.batch_size,
+        num_epochs=args.num_epochs,
     )
