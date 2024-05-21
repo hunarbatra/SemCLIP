@@ -28,7 +28,6 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
 
     semclip.model.to(DEVICE)
 
-    print(f'learning rate: {lr}')
     learning_rate = lr # huggingface trainer default lr: 5e-5
     betas = (0.9, 0.999) # huggingface trainer default betas
     epsilon = 1e-6 # huggingface trainer default epsilon
