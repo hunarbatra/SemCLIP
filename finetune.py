@@ -158,7 +158,7 @@ def train_model(
                 if lr_scheduler == 'reduce':
                     scheduler.step(total_loss)
                 else:
-                    schedule.step()
+                    scheduler.step()
             
             # Save checkpoint after each batch
             print(f'Saving checkpoint at... {checkpoint_path}')
