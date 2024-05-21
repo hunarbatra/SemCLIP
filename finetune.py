@@ -16,8 +16,21 @@ from SemCLIP.image_utils import DEVICE, create_batches, pil_to_cv2
 from SemCLIP.model_utils import convert_models_to_fp32, convert_models_to_fp16
 from config import dataset_mapper
 
+from typing import Optional
 
-def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention', projection_dim=512, data='COCO-13k', resume_training=False, train_name='semclip-v1', batch_size=64, num_epochs=3, lr=5e-5):
+
+def train_model(
+    base_model: str = 'openai/clip-vit-base-patch32', 
+    pool_type: str = 'attention', 
+    projection_dim: int = 512, 
+    data: str = 'COCO-13k', 
+    resume_training: bool = False, 
+    train_name: str = 'semclip-v1', 
+    batch_size: int = 64, 
+    num_epochs: int = 3, 
+    lr: float = 5e-5,
+    lr_scheduler: Optional[str] = None,
+):
     # Initialize SemCLIP
     semclip = SemCLIP(model_name=base_model, pool_type='attention', projection_dim=512, device=DEVICE)
     
@@ -46,7 +59,24 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
     if DEVICE == "cpu":
         semclip.model.float() # convert the model params to float if using CPU
 
-    optimizer = torch.optim.AdamW(semclip.model.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(semclip.model.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
+    
+    if lr_scheduler is not None:
+        if lr_scheduler == 'cosine':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, 
+                T_max=num_epochs
+            )
+        elif lr_scheduler == 'reduce': # reduce on plateau
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 
+                               mode='min',
+                               factor=0.3, 
+                               patience=5,
+                               verbose=True,
+                               min_lr=1e-6,
+                               threshold=0.01,
+                               threshold_mode='abs'
+                        )
 
     loss_fn = torch.nn.CrossEntropyLoss()
 
@@ -64,6 +94,8 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
         checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
         semclip.model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if lr_schedule is not None:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch']
         start_batch = checkpoint['batch'] + 1
         wandb_run_id = checkpoint['wandb_run_id']
@@ -106,7 +138,7 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
             logits_per_image, logits_per_text = semclip.process_final_embeddings(image_embeddings, text_embeddings)
                 
             # Compute the loss
-            ground_truth = torch.arange(len(logits_per_text)).to(DEVICE)
+            ground_truth = torch.arange(len(logits_per_text), device=DEVICE).long()
             text_loss = loss_fn(logits_per_text, ground_truth) # contrastive loss
             image_loss = loss_fn(logits_per_text.t(), ground_truth) # contrastive loss
             total_loss = (text_loss + image_loss) / 2.0
@@ -121,16 +153,25 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
                 convert_models_to_fp32(semclip.model)
                 optimizer.step()
                 convert_models_to_fp16(semclip.model)
+                
+            if lr_scheduler is not None:
+                if lr_scheduler == 'reduce':
+                    scheduler.step(total_loss)
+                else:
+                    schedule.step()
             
             # Save checkpoint after each batch
             print(f'Saving checkpoint at... {checkpoint_path}')
-            torch.save({
+            checkpoint = {
                 'epoch': epoch,
                 'batch': batch_idx,
                 'model_state_dict': semclip.model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'wandb_run_id': wandb_run_id,
-            }, checkpoint_path)
+            }
+            if lr_scheduler is not None:
+                checkpoint['scheduler_state_dict'] = scheduler.state_dict()
+            torch.save(checkpoint, checkpoint_path)
             
             # Log the loss to wandb after each batch
             wandb.log({"Loss": total_loss.item()})
@@ -151,6 +192,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for training')
     parser.add_argument('--num_epochs', type=int, default=3, help='Number of epochs for training') # note: huggingface trainer default num_train_epochs = 3
     parser.add_argument('--lr', type=float, default=5e-5, help='Learning rate for training')
+    parser.add_argument('--lr_scheduler', type=str, default=None, help='Learning rate scheduler for training; options: "cosine", "reduce"')
     
     args = parser.parse_args()
     
@@ -164,4 +206,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         num_epochs=args.num_epochs,
         lr=args.lr,
+        lr_scheduler=args.lr_scheduler,
     )
