@@ -106,7 +106,7 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
             logits_per_image, logits_per_text = semclip.process_final_embeddings(image_embeddings, text_embeddings)
                 
             # Compute the loss
-            ground_truth = torch.arange(batch_size).to(DEVICE)
+            ground_truth = torch.arange(len(logits_per_text)).to(DEVICE)
             text_loss = loss_fn(logits_per_text, ground_truth) # contrastive loss
             image_loss = loss_fn(logits_per_text.t(), ground_truth) # contrastive loss
             total_loss = (text_loss + image_loss) / 2.0
@@ -137,8 +137,6 @@ def train_model(base_model='openai/clip-vit-base-patch32', pool_type='attention'
             
             # Update the progress bar with the current loss
             pbar.set_postfix(Loss=total_loss.item())
-
-    semclip.model = model
 
     semclip.upload_model_to_hf_hub(model_name=train_name, hf_name='hunarbatra')
 
