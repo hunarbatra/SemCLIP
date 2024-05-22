@@ -172,6 +172,9 @@ class SemCLIP:
 
         image_embeddings = torch.cat(image_embeddings, dim=0)
         text_embeddings = torch.cat(text_embeddings, dim=0)
+        
+        image_embeddings.to(self.device)
+        text_embeddings.to(self.device)
 
         return image_embeddings, text_embeddings
     
@@ -197,7 +200,7 @@ class SemCLIP:
         return image_embeddings, text_embeddings
     
     def process_final_embeddings(self, image_embeddings, text_embeddings):
-        # Apply L2 normalization
+        # Apply L2 Normalisation to normalize the embeddings to unit length
         image_embeddings = image_embeddings / image_embeddings.norm(p=2, dim=-1, keepdim=True)
         text_embeddings = text_embeddings / text_embeddings.norm(p=2, dim=-1, keepdim=True)
 
