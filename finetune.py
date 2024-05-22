@@ -136,12 +136,20 @@ def train_model(
             
             # Process final embeddings (normalize, compute logits)
             logits_per_image, logits_per_text = semclip.process_final_embeddings(image_embeddings, text_embeddings)
+            logits_per_image.to(DEVICE)
+            logits_per_text.to(DEVICE)
                 
             # Compute the loss
             ground_truth = torch.arange(len(logits_per_text), device=DEVICE).long()
             text_loss = loss_fn(logits_per_text, ground_truth) # contrastive loss
             image_loss = loss_fn(logits_per_text.t(), ground_truth) # contrastive loss
             total_loss = (text_loss + image_loss) / 2.0
+            
+            # debug loss error
+            print("Before optimizer step:")
+            for name, param in semclip.model.named_parameters():
+                if param.requires_grad:
+                    print(name, param.data.sum())
                 
             # Backward pass
             total_loss.backward()
@@ -159,6 +167,12 @@ def train_model(
                     scheduler.step(total_loss)
                 else:
                     scheduler.step()
+              
+            # debug loss error       
+            print("After optimizer step:")
+            for name, param in semclip.model.named_parameters():
+                if param.requires_grad:
+                    print(name, param.data.sum())
             
             # Save checkpoint after each batch
             print(f'Saving checkpoint at... {checkpoint_path}')
