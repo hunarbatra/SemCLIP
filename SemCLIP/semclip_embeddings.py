@@ -11,8 +11,8 @@ class CLIPMLP(nn.Module):
         super().__init__()
         self.config = config
         self.activation_fn = ACT2FN[config.hidden_act]
-        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size)
-        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size)
+        self.fc1 = nn.Linear(config.hidden_size, config.intermediate_size).to(DEVICE)
+        self.fc2 = nn.Linear(config.intermediate_size, config.hidden_size).to(DEVICE)
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         hidden_states = self.fc1(hidden_states)
@@ -24,9 +24,9 @@ class SemCLIPMultiheadAttentionPoolingHead(nn.Module):
     """Multihead Attention Pooling for SemCLIP."""
     def __init__(self, config):
         super().__init__()
-        self.probe = nn.Parameter(torch.randn(1, 1, config.hidden_size))
-        self.attention = torch.nn.MultiheadAttention(config.hidden_size, config.num_attention_heads, batch_first=True)
-        self.layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
+        self.probe = nn.Parameter(torch.randn(1, 1, config.hidden_size)).to(DEVICE)
+        self.attention = torch.nn.MultiheadAttention(config.hidden_size, config.num_attention_heads, batch_first=True).to(DEVICE)
+        self.layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps).to(DEVICE)
         self.mlp = CLIPMLP(config)
 
     def forward(self, hidden_state):
@@ -50,15 +50,16 @@ class SemCLIPVisionEmbeddings(nn.Module):
         self.patch_size = config.patch_size
         self.num_channels = config.num_channels
 
-        self.class_embedding = nn.Parameter(torch.randn(1, 1, self.embed_dim))
+        self.class_embedding = nn.Parameter(torch.randn(1, 1, self.embed_dim), requires_grad=True).to(DEVICE)
         self.patch_dim = self.patch_size * self.patch_size * self.num_channels
-        self.patch_embedding = nn.Linear(self.patch_dim, self.embed_dim, bias=False)
+        self.patch_embedding = nn.Linear(self.patch_dim, self.embed_dim, bias=False).to(DEVICE)
 
-        self.patch_norm1 = nn.LayerNorm(self.patch_dim)
-        self.patch_norm2 = nn.LayerNorm(self.embed_dim)
+        self.patch_norm1 = nn.LayerNorm(self.patch_dim).to(DEVICE)
+        self.patch_norm2 = nn.LayerNorm(self.embed_dim).to(DEVICE)
 
-        self.position_embedding = nn.Linear(4, self.embed_dim)  # 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
-        self.class_position_embedding = nn.Parameter(torch.randn(1, self.embed_dim)) # Additional embedding for the class token that is prepended
+        self.position_embedding = nn.Linear(4, self.embed_dim).to(DEVICE)  # 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
+        self.position_embedding.weight.requires_grad = True
+        self.class_position_embedding = nn.Parameter(torch.randn(1, self.embed_dim), requires_grad=True).to(DEVICE) # Additional embedding for the class token that is prepended
         
         self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
 
@@ -99,8 +100,10 @@ class SemCLIPTextEmbeddings(nn.Module):
         self.vocab_size = config.vocab_size
         self.max_position_embeddings = config.max_position_embeddings
 
-        self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
-        self.position_embedding = nn.Linear(4, self.embed_dim)  # 4 for [x, y, w, h] - Positional embedding layer for token coordinates
+        self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim).to(DEVICE)
+        self.token_embedding.weight.requires_grad = True
+        self.position_embedding = nn.Linear(4, self.embed_dim).to(DEVICE)  # 4 for [x, y, w, h] - Positional embedding layer for token coordinates
+        self.position_embedding.weight.requires_grad = True
         
         self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
 
