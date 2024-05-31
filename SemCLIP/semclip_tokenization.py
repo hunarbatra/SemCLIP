@@ -152,8 +152,14 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
 
 def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False, image_file: Optional[np.ndarray] = None):
     if image_file is None:
-        image_path = f"data/{data_name}/{image_name}"
-        image_bgr = cv2.imread(image_path)
+        image_path = f"./data/{data_name}/{image_name}"
+        try:
+            image_bgr = cv2.imread(image_path)
+            if image_bgr is None:
+                raise ValueError(f"Image at path {image_path} could not be loaded.")
+        except Exception as e:
+            print(f"Error reading image: {e}")
+            return
     else:
         image_bgr = image_file
         
