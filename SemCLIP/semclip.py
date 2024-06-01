@@ -115,7 +115,7 @@ class SemCLIP(nn.Module):
         
         if multi_threading:
             max_workers = min(len(images), 64) # max workers for ThreadPoolExecutor
-            print('Running in parallel with {max_workers} workers')
+            print(f'Running in parallel with {max_workers} workers')
             
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_embeds = {executor.submit(self.process_image_text, image, caption): (image, caption) for image, caption in zip(images, captions)}
