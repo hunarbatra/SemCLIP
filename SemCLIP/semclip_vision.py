@@ -6,24 +6,23 @@ from .semclip_embeddings import SemCLIPVisionEmbeddings
 from .image_utils import DEVICE
 
 
-class SemCLIPVision(nn.Module):
-    def __init__(self, model, vision_config, pool_type='attention'):
-        super().__init__()
-        self.model = model
+class SemCLIPVision():
+    def __init__(self, vision_model, vision_config, pool_type='attention'):
+        self.vision_model = vision_model
         self.vision_config = vision_config
         self.pool_type = pool_type
         
     def forward(self, image_resized_patches, normalized_boox_coords):
         # Pass image patches through custom CLIPVisionEmbeddings module
-        patch_embeddings = SemCLIPVisionEmbeddings(self.vision_config, len(image_resized_patches)).to(DEVICE)
+        patch_embeddings = SemCLIPVisionEmbeddings(self.vision_model, self.vision_config, len(image_resized_patches)).to(DEVICE)
         output_embeddings = patch_embeddings(image_resized_patches, normalized_boox_coords)
         
         # apply pre-layer normalization
         # additional layer norm to the combined patch + positional embeddings before passing onto the transformer encoder
-        hidden_states = self.model.vision_model.pre_layrnorm(output_embeddings)
+        hidden_states = self.vision_model.pre_layrnorm(output_embeddings)
         
         # pass the normalized embeddings through the CLIP transformer encoder
-        encoder_outputs = self.model.vision_model.encoder(
+        encoder_outputs = self.vision_model.encoder(
             inputs_embeds=hidden_states,
             output_attentions=False,
             output_hidden_states=False,
@@ -44,6 +43,6 @@ class SemCLIPVision(nn.Module):
             raise ValueError(f"Invalid pooling type: {self.pool_type}")
         
         # post layer normalization
-        pooled_output = self.model.vision_model.post_layernorm(pooled_output)
+        pooled_output = self.vision_model.post_layernorm(pooled_output)
         
         return pooled_output

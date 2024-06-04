@@ -9,10 +9,9 @@ from .image_utils import DEVICE
 from typing import Optional
 
 
-class SemCLIPText(nn.Module):
-    def __init__(self, model, text_config, tokenizer, pool_type='attention'):
-        super(SemCLIPText, self).__init__()
-        self.model = model
+class SemCLIPText():
+    def __init__(self, text_model, text_config, tokenizer, pool_type='attention'):
+        self.text_model = text_model
         self.text_config = text_config
         self.tokenizer = tokenizer
         self.pool_type = pool_type
@@ -24,7 +23,7 @@ class SemCLIPText(nn.Module):
         attention_mask = inputs["attention_mask"]
 
         # Pass input_ids through custom SemCLIPTextEmbeddings module
-        text_embeddings = SemCLIPTextEmbeddings(self.text_config, self.tokenizer).to(DEVICE)
+        text_embeddings = SemCLIPTextEmbeddings(self.text_model, self.text_config, self.tokenizer).to(DEVICE)
 
         hidden_states = text_embeddings(input_ids)
 
@@ -39,7 +38,7 @@ class SemCLIPText(nn.Module):
             attention_mask = _prepare_4d_attention_mask(attention_mask, hidden_states.dtype)
 
         # Pass the hidden states through the encoder
-        encoder_outputs = self.model.text_model.encoder(
+        encoder_outputs = self.text_model.encoder(
             inputs_embeds=hidden_states,
             attention_mask=attention_mask,
             causal_attention_mask=causal_attention_mask,
@@ -50,10 +49,10 @@ class SemCLIPText(nn.Module):
 
         # Get the last hidden state, apply pooling and apply final layer normalization
         last_hidden_state = encoder_outputs.last_hidden_state
-        last_hidden_state = self.model.text_model.final_layer_norm(last_hidden_state) # final layer norm is applied before pooling in huggingface transformers CLIP implentation
+        last_hidden_state = self.text_model.final_layer_norm(last_hidden_state) # final layer norm is applied before pooling in huggingface transformers CLIP implentation
 
         if self.pool_type == 'cls':
-            if self.model.text_model.config.eos_token_id == 2:
+            if self.text_model.config.eos_token_id == 2:
                 # The `eos_token_id` was incorrect before PR #24773: Let's keep what have been done here.
                 # A CLIP model with such `eos_token_id` in the config can't work correctly with extra new tokens added
                 pooled_output = last_hidden_state[
@@ -66,7 +65,7 @@ class SemCLIPText(nn.Module):
                     torch.arange(last_hidden_state.shape[0], device=last_hidden_state.device),
                     # We need to get the first position of `eos_token_id` value (`pad_token_ids` might equal to `eos_token_id`)
                     # Note: we assume each sequence (along batch dim.) contains an  `eos_token_id` (e.g. prepared by the tokenizer)
-                    (input_ids.to(dtype=torch.int, device=last_hidden_state.device) == self.model.text_model.config.eos_token_id)
+                    (input_ids.to(dtype=torch.int, device=last_hidden_state.device) == self.text_model.config.eos_token_id)
                     .int()
                     .argmax(dim=-1),
                 ]
