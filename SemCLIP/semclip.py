@@ -113,29 +113,34 @@ class SemCLIP(nn.Module):
             
         return image_features, text_features
 
-    def forward(self, images, texts, image_folder=None, multi_threading=False):
+    def forward(self, images, texts, image_folder=None, multi_threading=False, raw_embeds=False):
         image_embeddings = []
         text_embeddings = []
         
-        if multi_threading:
-            max_workers = min(len(images), 64) # max workers for ThreadPoolExecutor
-            print(f'Running in parallel with {max_workers} workers')
-            
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_embeds = {executor.submit(self.generate_image_text_embeddings, image, caption, image_folder): (image, caption) for image, caption in zip(images, texts)}
+        if not raw_embeds: # generate embeddings
+            if multi_threading:
+                max_workers = min(len(images), 64) # max workers for ThreadPoolExecutor
+                print(f'Running in parallel with {max_workers} workers')
                 
-                for future in as_completed(future_to_embeds):
-                    try:
-                        image_embedding, text_embedding = future.result()
-                        image_embeddings.append(image_embedding)
-                        text_embeddings.append(text_embedding)
-                    except Exception as e:
-                        print(f"Exception: {e}")
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    future_to_embeds = {executor.submit(self.generate_image_text_embeddings, image, caption, image_folder): (image, caption) for image, caption in zip(images, texts)}
+                    
+                    for future in as_completed(future_to_embeds):
+                        try:
+                            image_embedding, text_embedding = future.result()
+                            image_embeddings.append(image_embedding)
+                            text_embeddings.append(text_embedding)
+                        except Exception as e:
+                            print(f"Exception: {e}")
+            else:
+                for image, caption in zip(images, texts):
+                    image_embedding, text_embedding = self.generate_image_text_embeddings(image, caption, image_folder)
+                    image_embeddings.append(image_embedding)
+                    text_embeddings.append(text_embedding)
         else:
-            for image, caption in zip(images, texts):
-                image_embedding, text_embedding = self.generate_image_text_embeddings(image, caption, image_folder)
-                image_embeddings.append(image_embedding)
-                text_embeddings.append(text_embedding)
+            # raw embeddings in images and text
+            image_embeddings = [images]
+            text_embeddings = [texts]
 
         image_embeddings = torch.cat(image_embeddings, dim=0).to(self.device)
         text_embeddings = torch.cat(text_embeddings, dim=0).to(self.device)
