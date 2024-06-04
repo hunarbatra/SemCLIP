@@ -42,47 +42,40 @@ class SemCLIPMultiheadAttentionPoolingHead(nn.Module):
         return hidden_state[:, 0]
 
 class SemCLIPVisionEmbeddings(nn.Module):
-    def __init__(self, config, num_patches):
+    def __init__(self, vision_model, config, num_patches):
         super().__init__()
+        self.model = vision_model
         self.config = config
         self.embed_dim = config.hidden_size
         self.num_patches = num_patches
         self.patch_size = config.patch_size
         self.num_channels = config.num_channels
 
-        self.class_embedding = nn.Parameter(torch.randn(1, 1, self.embed_dim), requires_grad=True).to(DEVICE)
         self.patch_dim = self.patch_size * self.patch_size * self.num_channels
-        self.patch_embedding = nn.Linear(self.patch_dim, self.embed_dim, bias=False).to(DEVICE)
 
         self.patch_norm1 = nn.LayerNorm(self.patch_dim).to(DEVICE)
         self.patch_norm2 = nn.LayerNorm(self.embed_dim).to(DEVICE)
 
-        self.position_embedding = nn.Linear(4, self.embed_dim).to(DEVICE)  # 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
-        self.position_embedding.weight.requires_grad = True
         self.class_position_embedding = nn.Parameter(torch.randn(1, self.embed_dim), requires_grad=True).to(DEVICE) # Additional embedding for the class token that is prepended
         
         self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
-
+        
     def forward(self, patch_list, bbox_coords):
-        # Ensure patch_list is on the correct device
-        patch_list = [patch.to(self.patch_embedding.weight.device) for patch in patch_list]
-        bbox_coords = bbox_coords.to(self.patch_embedding.weight.device)
-
+        patch_tensor = torch.stack(patch_list, dim=0).to(DEVICE) # [batch_size, 1, 3, 32, 32]
+        batch_size = patch_tensor.size(0)
+        
         # process individual patch embeddings just like ViTs original implementation 
-        patch_embeds_list = []
-        for patch in patch_list: 
-            patch_flat = patch.view(1, -1) # flatten the patch
-            patch_norm = self.patch_norm1(patch_flat) # apply layer norm (32*32*3)
-            patch_embed = self.patch_embedding(patch_norm) # pass the patch through a linear layer (32*32*3, 768)
-            patch_final = self.patch_norm2(patch_embed) # apply layer norm (768)
-            patch_embeds_list.append(patch_embed)
-
-        # patch embeddings
-        patch_embeds = torch.stack(patch_embeds_list, dim=1)  # stack along dimension 1
-        embeddings = torch.cat([self.class_embedding, patch_embeds], dim=1)  # Concatenate class embeddings to each patch embedding (Concatenating along the patch dimension)
+        input_patch_tensor = patch_tensor.view(batch_size, self.num_channels, self.patch_size, self.patch_size) # [batch_size, 3, 32, 32]
+        input_patch_tensor = input_patch_tensor.view(batch_size, -1) # flatten the patches - [batch_size, 3072]
+        patch_norm = self.patch_norm1(input_patch_tensor) # apply layer norm (32*32*3) - shape: [batch_size, 3072]
+        patch_embed = self.model.embeddings.patch_embedding(patch_norm) # pass the patch through a linear layer (32*32*3, 768) - shape: [batch_size, 768]
+        patch_final = self.patch_norm2(patch_embed) # apply layer norm (768) - shape: [batch_size, 768]
+        patch_embeds = patch_final.unsqueeze(0) # [1, batch_size, 768]
+        
+        embeddings = torch.cat([self.model.embeddings.class_embedding.unsqueeze(0).unsqueeze(0), patch_embeds], dim=1)  # Concatenate class embeddings [1, 1, 768] to each patch embedding [1, batch_size, 768] (Concatenating along the patch dimension)
 
         # bbox positional embeddings
-        positional_embeddings = self.position_embedding(bbox_coords).unsqueeze(0)
+        positional_embeddings = self.model.embeddings.position_embedding(bbox_coords).unsqueeze(0)
         class_pos_embedding = self.class_position_embedding.unsqueeze(0)
         positional_embeddings = torch.cat([class_pos_embedding, positional_embeddings], dim=1)
 
@@ -92,18 +85,16 @@ class SemCLIPVisionEmbeddings(nn.Module):
     
     
 class SemCLIPTextEmbeddings(nn.Module):
-    def __init__(self, config, tokenizer):
+    def __init__(self, text_model, config, tokenizer):
         super().__init__()
+        self.model = text_model
         self.config = config
         self.tokenizer = tokenizer
         self.embed_dim = config.hidden_size
         self.vocab_size = config.vocab_size
         self.max_position_embeddings = config.max_position_embeddings
 
-        self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim).to(DEVICE)
-        self.token_embedding.weight.requires_grad = True
-        self.position_embedding = nn.Linear(4, self.embed_dim).to(DEVICE)  # 4 for [x, y, w, h] - Positional embedding layer for token coordinates
-        self.position_embedding.weight.requires_grad = True
+        self.token_embedding = self.model.embeddings.token_embedding.to(DEVICE)
         
         self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
 
@@ -113,7 +104,7 @@ class SemCLIPTextEmbeddings(nn.Module):
         token_embeddings = self.token_embedding(input_ids.to(DEVICE))
 
         token_positions = self.get_token_positions(input_ids).to(DEVICE)
-        positional_embeddings = self.position_embedding(token_positions)
+        positional_embeddings = self.model.embeddings.position_embedding(token_positions)
 
         embeddings = token_embeddings + positional_embeddings
 
