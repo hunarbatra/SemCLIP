@@ -11,7 +11,7 @@ from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamP
 from .image_utils import normalize_bbox_coords, DEVICE
 
 from PIL import Image
-from typing import Optional
+from typing import Optional, List
 
 
 sam = sam_model_registry["vit_h"](checkpoint='./sam-weights/sam_vit_h_4b8939.pth').to(device=DEVICE)
@@ -150,7 +150,7 @@ def generate_crops_from_detections(image_path, detections, annotated_image, save
 
     return cropped_images, remove_bbox
 
-def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False, image_file: Optional[np.ndarray] = None):
+def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False, image_file: Optional[np.ndarray] = None) -> (List[Image.Image], torch.Tensor):
     if image_file is None:
         image_path = f"./data/{data_name}/{image_name}"
         try:
@@ -189,7 +189,7 @@ def preprocess_patches(image_name: str, data_name: str, save_crops: bool = False
     normalized_bbox_coords = normalize_bbox_coords(bboxes, image_bgr) # tensor
 
     return cropped_images_detection, normalized_bbox_coords
-
+    
     
 if __name__ == "__main__":
     fire.Fire(preprocess_patches)
