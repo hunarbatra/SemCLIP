@@ -27,14 +27,10 @@ def normalize_bbox_coords(bboxes, image_bgr):
     return normalized_bbox_coords
 
 def convert_patches_to_pixel_values(patches: List[Image.Image], patch_size: int = 32, patch_processor: CLIPImageProcessor = None):
-    image_resized_patches = []
+    resized_patches = [patch.resize((patch_size, patch_size), Image.LANCZOS) for patch in patches]
+    processed_patches = [patch_processor(images=resized_patch, return_tensors="pt")['pixel_values'] for resized_patch in resized_patches]
     
-    for patch in patches:
-        resized_patch = patch.resize((patch_size, patch_size), Image.LANCZOS) 
-        inputs = patch_processor(images=resized_patch, return_tensors="pt")
-        image_resized_patches.append(inputs['pixel_values'])
-    
-    return image_resized_patches
+    return processed_patches
 
 def create_batches(dataset, batch_size):
     dataset = dataset.shuffle(seed=42)
