@@ -30,12 +30,12 @@ class SemCLIPText():
         # CLIP's text model uses causal mask, prepare it here.
         input_shape = input_ids.size()
         causal_attention_mask = _create_4d_causal_attention_mask(
-            input_shape, hidden_states.dtype, device=hidden_states.device
+            input_shape, hidden_states.dtype, device=DEVICE,
         )
         # expand attention_mask
         if attention_mask is not None:
             # [bsz, seq_len] -> [bsz, 1, tgt_seq_len, src_seq_len]
-            attention_mask = _prepare_4d_attention_mask(attention_mask, hidden_states.dtype)
+            attention_mask = _prepare_4d_attention_mask(attention_mask, hidden_states.dtype).to(DEVICE)
 
         # Pass the hidden states through the encoder
         encoder_outputs = self.text_model.encoder(

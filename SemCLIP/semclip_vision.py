@@ -15,6 +15,7 @@ class SemCLIPVision():
     def forward(self, image_resized_patches, normalized_boox_coords):
         # Pass image patches through custom CLIPVisionEmbeddings module
         patch_embeddings = SemCLIPVisionEmbeddings(self.vision_model, self.vision_config, len(image_resized_patches)).to(DEVICE)
+        normalized_boox_coords = normalized_boox_coords.to(DEVICE)
         output_embeddings = patch_embeddings(image_resized_patches, normalized_boox_coords)
         
         # apply pre-layer normalization

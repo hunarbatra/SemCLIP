@@ -83,6 +83,8 @@ class SemCLIP(nn.Module):
         image_resized_patches, normalized_bbox_coords = preprocess_patches(image_name, data_name, image_file=image_file)
         # preprocess the patches (CLIPImageProcessor)
         image_resized_patches = convert_patches_to_pixel_values(image_resized_patches, patch_size=self.model.vision_model.config.patch_size, patch_processor=self.patch_processor) # list of torch.tensor
+        
+        normalized_bbox_coords = normalized_bbox_coords.to(self.device)
 
         if not return_embeds:
             return image_resized_patches, normalized_bbox_coords
@@ -91,7 +93,7 @@ class SemCLIP(nn.Module):
 
         return image_features
 
-    def get_text_features(self, text, return_embeds=False):
+    def get_text_features(self, text, return_embeds=False):        
         if not return_embeds:
             return text
 
