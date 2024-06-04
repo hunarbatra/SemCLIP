@@ -61,7 +61,7 @@ def train_model(
     if DEVICE == "cpu":
         semclip.model.float() # convert the model params to float if using CPU
 
-    optimizer = torch.optim.Adam(semclip.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(semclip.model.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
     
     if lr_scheduler is not None:
         if lr_scheduler == 'cosine':
@@ -96,7 +96,7 @@ def train_model(
         checkpoint = torch.load(checkpoint_path, map_location=DEVICE)
         semclip.model.load_state_dict(checkpoint['model_state_dict'])
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if lr_schedule is not None:
+        if lr_scheduler is not None:
             scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
         start_epoch = checkpoint['epoch']
         start_batch = checkpoint['batch'] + 1
