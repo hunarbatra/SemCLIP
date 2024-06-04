@@ -30,6 +30,7 @@ def train_model(
     num_epochs: int = 3, 
     lr: float = 5e-5,
     lr_scheduler: Optional[str] = None,
+    multi_threading: bool = False,
 ):
     # Initialize SemCLIP
     semclip = SemCLIP(model_name=base_model, pool_type='attention', projection_dim=512, device=DEVICE)
@@ -40,6 +41,7 @@ def train_model(
     wandb.login(key=os.getenv("WANDB_API_KEY"))
 
     semclip.model.to(DEVICE)
+    semclip.to(DEVICE)
 
     learning_rate = lr # huggingface trainer default lr: 5e-5
     betas = (0.9, 0.999) # huggingface trainer default betas
@@ -59,7 +61,7 @@ def train_model(
     if DEVICE == "cpu":
         semclip.model.float() # convert the model params to float if using CPU
 
-    optimizer = torch.optim.Adam(semclip.model.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
+    optimizer = torch.optim.Adam(semclip.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
     
     if lr_scheduler is not None:
         if lr_scheduler == 'cosine':
@@ -129,27 +131,15 @@ def train_model(
 
             # Forward pass through the model
             try:
-                image_embeddings, text_embeddings = semclip.get_semclip_embeddings_direct_img(images=image_batch_cv2, captions=text_batch)
+                logits_per_image, logits_per_text = semclip(images=image_batch_cv2, texts=text_batch, multi_threading=multi_threading)
             except Exception as e:
-                print(f"error: {e}; images batch being processed: {batch['image']}")
-                continue
-            
-            # Process final embeddings (normalize, compute logits)
-            logits_per_image, logits_per_text = semclip.process_final_embeddings(image_embeddings, text_embeddings)
-            logits_per_image.to(DEVICE)
-            logits_per_text.to(DEVICE)
+                return ValueError(f"error: {e}; images batch being processed: {batch['image']}")
                 
             # Compute the loss
             ground_truth = torch.arange(len(logits_per_text), device=DEVICE).long()
             text_loss = loss_fn(logits_per_text, ground_truth) # contrastive loss
             image_loss = loss_fn(logits_per_text.t(), ground_truth) # contrastive loss
             total_loss = (text_loss + image_loss) / 2.0
-            
-            # debug loss error
-            print("Before optimizer step:")
-            for name, param in semclip.model.named_parameters():
-                if param.requires_grad:
-                    print(name, param.data.sum())
                 
             # Backward pass
             total_loss.backward()
@@ -167,12 +157,6 @@ def train_model(
                     scheduler.step(total_loss)
                 else:
                     scheduler.step()
-              
-            # debug loss error       
-            print("After optimizer step:")
-            for name, param in semclip.model.named_parameters():
-                if param.requires_grad:
-                    print(name, param.data.sum())
             
             # Save checkpoint after each batch
             print(f'Saving checkpoint at... {checkpoint_path}')
@@ -195,6 +179,7 @@ def train_model(
 
     semclip.upload_model_to_hf_hub(model_name=train_name, hf_name='hunarbatra')
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train SemCLIP model")
     parser.add_argument('--data', type=str, default='COCO-13k', help='Dataset name, default: COCO-13k - check config.py for more dataset options or to add more datasets')
@@ -207,6 +192,7 @@ if __name__ == "__main__":
     parser.add_argument('--num_epochs', type=int, default=3, help='Number of epochs for training') # note: huggingface trainer default num_train_epochs = 3
     parser.add_argument('--lr', type=float, default=5e-5, help='Learning rate for training')
     parser.add_argument('--lr_scheduler', type=str, default=None, help='Learning rate scheduler for training; options: "cosine", "reduce"')
+    parser.add_argument('--multi_threading', action='store_true', help='Use multi-threading for patches extraction')
     
     args = parser.parse_args()
     
@@ -221,4 +207,5 @@ if __name__ == "__main__":
         num_epochs=args.num_epochs,
         lr=args.lr,
         lr_scheduler=args.lr_scheduler,
+        multi_threading=args.multi_threading,
     )
