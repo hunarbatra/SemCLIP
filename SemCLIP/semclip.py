@@ -119,7 +119,7 @@ class SemCLIP(nn.Module):
         
         if not raw_embeds: # generate embeddings
             if multi_threading:
-                max_workers = min(len(images), 64) # max workers for ThreadPoolExecutor
+                max_workers = min(len(images), 8) # max workers for ThreadPoolExecutor
                 print(f'Running in parallel with {max_workers} workers')
                 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
