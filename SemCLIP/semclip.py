@@ -228,7 +228,13 @@ if __name__ == "__main__":
     parser.add_argument("--text-pos-emb-2d", action="store_false", help="Use 2D positional embeddings for text")
     args = parser.parse_args()
 
-    semclip = SemCLIP(model_name=args.model_name, pool_type=args.pool_type, projection_dim=args.projection_dim, device=DEVICE, text_pos_emb_2d=args.text_pos_emb_2d)
+    semclip = SemCLIP(
+        model_name=args.model_name, 
+        pool_type=args.pool_type, 
+        projection_dim=args.projection_dim, 
+        device=DEVICE, 
+        text_pos_emb_2d=args.text_pos_emb_2d,
+    )
     image_features = semclip.get_image_features(args.image_name, args.data_name)
     text_features = semclip.get_text_features(args.text)
     
