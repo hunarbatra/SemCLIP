@@ -106,7 +106,7 @@ class SemCLIP(nn.Module):
         self.vision_features_extractor = SemCLIPImageFeatures(self.model.vision_model.config, self.vision_model, self.model.visual_projection, self.pool_type)
         self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.text_model, self.model.text_projection, self.pool_type, self.text_pos_emb_2d)
         
-        print(f'Text model being used: {self.text_model}, Using 2D position embeddings for text_model: {self.text_pos_emb_2d}')
+        print(f'Using 2D position embeddings for text_model: {self.text_pos_emb_2d}')
 
     def get_image_features(self, image_name: str, data_name: str, image_file: Optional[np.ndarray] = None, return_embeds=False):
         # load image segments patches and normalized bounding box coordinates
@@ -225,7 +225,7 @@ if __name__ == "__main__":
     parser.add_argument("--projection_dim", type=int, default=None, help="custom projection dimension, default: 512")
     parser.add_argument("--model_name", type=str, default="openai/clip-vit-base-patch32", help="CLIP model name, default: openai/clip-vit-base-patch32")
     parser.add_argument("--text", type=str, default="a photo of a dog", help="text input")
-    parser.add_argument("--text-pos-emb-2d", action="store_false", help="Use 2D positional embeddings for text")
+    parser.add_argument("--text_pos_emb_2d", action="store_false", help="Use 2D positional embeddings for text")
     args = parser.parse_args()
 
     semclip = SemCLIP(

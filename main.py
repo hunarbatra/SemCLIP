@@ -12,7 +12,7 @@ if __name__ == "__main__":
     parser.add_argument("--projection_dim", type=int, default=None, help="custom projection dimension, default: 512")
     parser.add_argument("--model_name", type=str, default="openai/clip-vit-base-patch32", help="CLIP model name, default: openai/clip-vit-base-patch32")
     parser.add_argument("--text", type=str, default="a photo of a dog", help="text input")
-    parser.add_argument("--text-pos-emb-2d", action="store_false", help="Use 2D positional embeddings for text")
+    parser.add_argument("--text_pos_emb_2d", action="store_false", help="Use 2D positional embeddings for text")
     args = parser.parse_args()
     
     semclip = SemCLIP(
