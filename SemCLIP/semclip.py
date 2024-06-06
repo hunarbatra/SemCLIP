@@ -78,7 +78,8 @@ class SemCLIP(nn.Module):
             bias=False
         ).to(device) # updated patch embedding layer
         self.model.vision_model.embeddings.position_embedding = nn.Linear(4, self.model.vision_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for vision model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
-        self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
+        if text_pos_emb_2d:
+            self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
 
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
         self.processor = CLIPProcessor.from_pretrained(model_name)
