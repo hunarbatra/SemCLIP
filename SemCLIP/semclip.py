@@ -49,10 +49,27 @@ class SemCLIPTextFeatures():
         return text_embeds
 
 class SemCLIP(nn.Module):
-    def __init__(self, model_name="openai/clip-vit-base-patch32", pool_type='attention', projection_dim=None, device=DEVICE):
+    def __init__(
+        self, 
+        model_name="openai/clip-vit-base-patch32", 
+        pool_type='attention', 
+        projection_dim=None, 
+        ignore_mismatched_sizes=False, 
+        text_pos_emb_2d=True,
+        device=DEVICE,
+    ):
         super(SemCLIP, self).__init__()
         self.device = device
-        self.model = CLIPModel.from_pretrained(model_name, token=HF_TOKEN).to(device)
+        self.ignored_mismatched_sizes = ignore_mismatched_sizes
+        
+        self.model = CLIPModel.from_pretrained(
+            model_name, 
+            token=HF_TOKEN, 
+            ignore_mismatched_sizes=self.ignored_mismatched_sizes
+        ).to(device)
+        
+        # Store original state dict to preserve weight loading for custom layers
+        # self.original_state_dict = self.model.state_dict()
         
         # Modify specific layers
         self.model.vision_model.embeddings.patch_embedding = nn.Linear(
@@ -60,8 +77,8 @@ class SemCLIP(nn.Module):
             self.model.vision_model.config.hidden_size, 
             bias=False
         ).to(device) # updated patch embedding layer
-        self.model.vision_model.embeddings.position_embedding = nn.Linear(4, self.model.vision_model.config.hidden_size).to(device) # updated position embedding layer for vision model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
-        self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
+        self.model.vision_model.embeddings.position_embedding = nn.Linear(4, self.model.vision_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for vision model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
+        self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
 
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
         self.processor = CLIPProcessor.from_pretrained(model_name)
@@ -73,7 +90,7 @@ class SemCLIP(nn.Module):
             self.model.text_model.config.projection_dim = projection_dim
 
         self.vision_model = SemCLIPVision(self.model.vision_model, self.model.vision_model.config, self.pool_type)
-        self.text_model = SemCLIPText(self.model.text_model, self.model.text_model.config, self.tokenizer, self.pool_type)
+        self.text_model = SemCLIPText(self.model.text_model, self.model.text_model.config, self.tokenizer, self.pool_type) if text_pos_emb_2d else self.model.text_model
 
         self.vision_features_extractor = SemCLIPImageFeatures(self.model.vision_model.config, self.vision_model, self.model.visual_projection, self.pool_type)
         self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.text_model, self.model.text_projection, self.pool_type)
