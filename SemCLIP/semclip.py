@@ -35,17 +35,26 @@ class SemCLIPImageFeatures():
         return image_embeds
 
 class SemCLIPTextFeatures():
-    def __init__(self, text_config, tokenizer, text_model, text_projection, pool_type, device=DEVICE):
+    def __init__(self, text_config, tokenizer, text_model, text_projection, pool_type, text_pos_emb_2d=True, device=DEVICE):
         self.device = device
+        
         self.text_model = text_model
         self.text_projection = text_projection
+        
+        self.text_pos_emb_2d = text_pos_emb_2d
+
 
     def forward(self, text):
-        # SemCLIP text model forward pass which returns the pooled output
-        # applies text processor, generates SemCLIPTextEmbeddings with 2D positional embeddings, and passes through the CLIP transformer encoder followed by pooling 
-        pooled_output = self.text_model.forward(text)
+        if self.text_pos_emb_2d:
+            # SemCLIP text model forward pass which returns the pooled output
+            # applies text processor, generates SemCLIPTextEmbeddings with 2D positional embeddings, and passes through the CLIP transformer encoder followed by pooling 
+            pooled_output = self.text_model.forward(text)
+        else:
+            pooled_output = self.text_model(**text).pooler_output # HuggingFace text model with 1D positional embeddings
+            
         # pass the pooled output through a final linear projection layer
         text_embeds = self.text_projection(pooled_output)
+        
         return text_embeds
 
 class SemCLIP(nn.Module):
@@ -61,6 +70,7 @@ class SemCLIP(nn.Module):
         super(SemCLIP, self).__init__()
         self.device = device
         self.ignored_mismatched_sizes = ignore_mismatched_sizes
+        self.text_pos_emb_2d = text_pos_emb_2d
         
         self.model = CLIPModel.from_pretrained(
             model_name, 
@@ -78,7 +88,7 @@ class SemCLIP(nn.Module):
             bias=False
         ).to(device) # updated patch embedding layer
         self.model.vision_model.embeddings.position_embedding = nn.Linear(4, self.model.vision_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for vision model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
-        if text_pos_emb_2d:
+        if self.text_pos_emb_2d: # 2D positional embeddings for text
             self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
 
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
@@ -91,10 +101,12 @@ class SemCLIP(nn.Module):
             self.model.text_model.config.projection_dim = projection_dim
 
         self.vision_model = SemCLIPVision(self.model.vision_model, self.model.vision_model.config, self.pool_type)
-        self.text_model = SemCLIPText(self.model.text_model, self.model.text_model.config, self.tokenizer, self.pool_type) if text_pos_emb_2d else self.model.text_model
+        self.text_model = SemCLIPText(self.model.text_model, self.model.text_model.config, self.tokenizer, self.pool_type) if self.text_pos_emb_2d else self.model.text_model # use 2D positional embeddings for text or original 1D positional embeddings (default: True)
 
         self.vision_features_extractor = SemCLIPImageFeatures(self.model.vision_model.config, self.vision_model, self.model.visual_projection, self.pool_type)
-        self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.text_model, self.model.text_projection, self.pool_type)
+        self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.text_model, self.model.text_projection, self.pool_type, self.text_pos_emb_2d)
+        
+        print(f'Text model being used: {self.text_model}, Using 2D position embeddings for text_model: {self.text_pos_emb_2d}')
 
     def get_image_features(self, image_name: str, data_name: str, image_file: Optional[np.ndarray] = None, return_embeds=False):
         # load image segments patches and normalized bounding box coordinates
@@ -111,7 +123,12 @@ class SemCLIP(nn.Module):
 
         return image_features
 
-    def get_text_features(self, text, return_embeds=False):        
+    def get_text_features(self, text, return_embeds=False): 
+        if not self.text_pos_emb_2d:
+            # preprocess text if 1D positional embeddings are used
+            # SemCLIP 2D positional embeddings internally tokenizes the input text and passes it through the CLIP transformer encoder followed by pooling, so it's not needed there
+            inputs = self.tokenizer(text, padding=True, return_tensors="pt").to(DEVICE)
+            
         if not return_embeds:
             return text
 
@@ -129,6 +146,10 @@ class SemCLIP(nn.Module):
             
         image_patches, bbox_coords = self.get_image_features(image_name=image_name, data_name=image_folder, image_file=image_file, return_embeds=False)
         image_features = self.vision_features_extractor.forward(image_patches, bbox_coords)
+        
+        if not self.text_pos_emb_2d:
+            # process text if 1D positional embeddings are being used
+            caption = self.tokenizer(caption, padding=True, return_tensors="pt").to(DEVICE)
         text_features = self.text_features_extractor.forward(caption)
             
         return image_features, text_features
@@ -139,7 +160,7 @@ class SemCLIP(nn.Module):
         
         if not raw_embeds: # generate embeddings
             if multi_threading:
-                max_workers = min(len(images), 8) # max workers for ThreadPoolExecutor
+                max_workers = min(len(images), 4) # max workers for ThreadPoolExecutor
                 print(f'Running in parallel with {max_workers} workers')
                 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -204,9 +225,10 @@ if __name__ == "__main__":
     parser.add_argument("--projection_dim", type=int, default=None, help="custom projection dimension, default: 512")
     parser.add_argument("--model_name", type=str, default="openai/clip-vit-base-patch32", help="CLIP model name, default: openai/clip-vit-base-patch32")
     parser.add_argument("--text", type=str, default="a photo of a dog", help="text input")
+    parser.add_argument("--text-pos-emb-2d", action="store_true", help="Use 2D positional embeddings for text")
     args = parser.parse_args()
 
-    semclip = SemCLIP(model_name=args.model_name, pool_type=args.pool_type, projection_dim=args.projection_dim, device=DEVICE)
+    semclip = SemCLIP(model_name=args.model_name, pool_type=args.pool_type, projection_dim=args.projection_dim, device=DEVICE, text_pos_emb_2d=args.text_pos_emb_2d)
     image_features = semclip.get_image_features(args.image_name, args.data_name)
     text_features = semclip.get_text_features(args.text)
     
