@@ -63,6 +63,7 @@ def train_model(
         "weight_decay": weight_decay,
         "num_epochs": num_epochs,
         "batch_size": batch_size,
+        "text_2d_pos_emb": text_pos_emb_2d,
     }
 
     if DEVICE == "cpu":
