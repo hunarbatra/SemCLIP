@@ -127,7 +127,7 @@ class SemCLIP(nn.Module):
         if not self.text_pos_emb_2d:
             # preprocess text if 1D positional embeddings are used
             # SemCLIP 2D positional embeddings internally tokenizes the input text and passes it through the CLIP transformer encoder followed by pooling, so it's not needed there
-            inputs = self.tokenizer(text, padding=True, return_tensors="pt").to(DEVICE)
+            text = self.tokenizer(text, padding=True, return_tensors="pt").to(DEVICE)
             
         if not return_embeds:
             return text
