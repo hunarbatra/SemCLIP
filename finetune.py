@@ -31,9 +31,16 @@ def train_model(
     lr: float = 5e-5,
     lr_scheduler: Optional[str] = None,
     multi_threading: bool = False,
+    text_pos_emb_2d: bool = True,
 ):
     # Initialize SemCLIP
-    semclip = SemCLIP(model_name=base_model, pool_type='attention', projection_dim=512, device=DEVICE)
+    semclip = SemCLIP(
+        model_name=base_model, 
+        pool_type='attention', 
+        projection_dim=512, 
+        device=DEVICE,
+        text_pos_emb_2d=text_pos_emb_2d, # use 2D positional embeddings for text or original 1D positional embeddings (default: True)
+    )
     
     # Load dataset
     dataset = load_dataset(dataset_mapper[data])
@@ -193,6 +200,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=5e-5, help='Learning rate for training')
     parser.add_argument('--lr_scheduler', type=str, default=None, help='Learning rate scheduler for training; options: "cosine", "reduce"')
     parser.add_argument('--multi_threading', action='store_true', help='Use multi-threading for patches extraction')
+    parser.add_argument('--text_pos_emb_2d', action='store_false', help='Use this flag to disable 2D positional embeddings for text')
     
     args = parser.parse_args()
     
@@ -208,4 +216,5 @@ if __name__ == "__main__":
         lr=args.lr,
         lr_scheduler=args.lr_scheduler,
         multi_threading=args.multi_threading,
+        text_pos_emb_2d=args.text_pos_emb_2d,
     )
