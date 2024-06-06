@@ -15,12 +15,12 @@ def normalize_bbox_coords(bboxes, image_bgr):
     # Normalize the bounding box coordinates
     normalized_bbox_coords = []
     for bbox in bboxes:
-        x1, y1, x2, y2 = bbox
+        x1, y1, w, h = bbox
         normalized_bbox_coords.append([
-            x1 / image_bgr.shape[1],
-            y1 / image_bgr.shape[0], 
-            x2 / image_bgr.shape[1], 
-            y2 / image_bgr.shape[0] 
+            x1 / image_bgr.shape[1], # normalise x1 by width
+            y1 / image_bgr.shape[0], # normalise y1 by height
+            w / image_bgr.shape[1], # normalise segment width with image width
+            h / image_bgr.shape[0] # normalise segment height with image height
         ])
 
     normalized_bbox_coords = torch.tensor(normalized_bbox_coords, dtype=torch.float32)
