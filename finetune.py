@@ -36,8 +36,8 @@ def train_model(
     # Initialize SemCLIP
     semclip = SemCLIP(
         model_name=base_model, 
-        pool_type='attention', 
-        projection_dim=512, 
+        pool_type=pool_type, 
+        projection_dim=projection_dim, 
         device=DEVICE,
         text_pos_emb_2d=text_pos_emb_2d, # use 2D positional embeddings for text or original 1D positional embeddings (default: True)
     )
