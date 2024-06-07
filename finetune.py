@@ -31,7 +31,7 @@ def train_model(
     lr: float = 5e-5,
     lr_scheduler: Optional[str] = None,
     multi_threading: bool = False,
-    text_pos_emb_2d: bool = True,
+    text_pos_emb_2d: bool = False,
 ):
     # Initialize SemCLIP
     semclip = SemCLIP(
@@ -201,7 +201,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=5e-5, help='Learning rate for training')
     parser.add_argument('--lr_scheduler', type=str, default=None, help='Learning rate scheduler for training; options: "cosine", "reduce"')
     parser.add_argument('--multi_threading', action='store_true', help='Use multi-threading for patches extraction')
-    parser.add_argument('--text_pos_emb_2d', action='store_false', help='Use this flag to disable 2D positional embeddings for text')
+    parser.add_argument('--text_pos_emb_2d', action='store_true', help='Use this flag to enable 2D positional embeddings for text')
     
     args = parser.parse_args()
     
