@@ -232,8 +232,8 @@ if __name__ == "__main__":
         device=DEVICE, 
         text_pos_emb_2d=args.text_pos_emb_2d,
     )
-    image_features = semclip.get_image_features(args.image_name, args.data_name)
-    text_features = semclip.get_text_features(args.text)
+    image_features = semclip.get_image_features(args.image_name, args.data_name, return_embeds=True)
+    text_features = semclip.get_text_features(args.text, return_embeds=True)
     
     logits_per_image, logits_per_text = semclip(images=image_features, texts=text_features, raw_embeds=True)
     
