@@ -151,7 +151,7 @@ class SemCLIP(nn.Module):
             
         return image_features, text_features
 
-    def forward(self, images, texts, image_folder=None, multi_threading=False, raw_embeds=False):
+    def forward(self, images, texts, image_folder=None, multi_threading=False, raw_embeds=False, return_features=False):
         image_embeddings = []
         text_embeddings = []
         
@@ -175,6 +175,8 @@ class SemCLIP(nn.Module):
                     image_embedding, text_embedding = self.generate_image_text_embeddings(image, caption, image_folder)
                     image_embeddings.append(image_embedding)
                     text_embeddings.append(text_embedding)
+            if return_features:
+                return image_embeddings, text_embeddings
         else:
             # raw embeddings in images and text
             image_embeddings = [images]
