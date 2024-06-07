@@ -39,7 +39,7 @@ def train_model(
         pool_type=pool_type, 
         projection_dim=projection_dim, 
         device=DEVICE,
-        text_pos_emb_2d=text_pos_emb_2d, # use 2D positional embeddings for text or original 1D positional embeddings (default: True)
+        text_pos_emb_2d=text_pos_emb_2d, # use 2D positional embeddings for text or original 1D positional embeddings (default: False)
     )
     
     # Load dataset
