@@ -75,8 +75,8 @@ def evaluate_semclip_model(
             
             # Convert the features list[torch.tensor] to numpy arrays
             # remove the extra dim [1, 1, 512] -> [1, 512] with squeeze()
-            image_features = np.array([img_feat.detach().to(DEVICE).squeeze().numpy() for img_feat in image_features])
-            label_features = np.array([label_feat.detach().to(DEVICE).squeeze().numpy() for label_feat in label_features])
+            image_features = np.array([img_feat.detach().cpu().squeeze().numpy() for img_feat in image_features])
+            label_features = np.array([label_feat.detach().cpu().squeeze().numpy() for label_feat in label_features])
             
             img_emb = image_features / np.linalg.norm(image_features, axis=1, keepdims=True)
             label_emb = label_features / np.linalg.norm(label_features, axis=1, keepdims=True)
@@ -146,12 +146,12 @@ def evaluate_clip_model(
         with torch.no_grad():
             # Get the image features
             image_inputs = processor(text=None, images=images_batch, return_tensors="pt")['pixel_values'].to(DEVICE)
-            img_emb = model.get_image_features(image_inputs).detach().to(DEVICE).numpy()
+            img_emb = model.get_image_features(image_inputs).detach().cpu().numpy()
             img_emb = img_emb / np.linalg.norm(img_emb, axis=1, keepdims=True)
             
             # Get the text features
             label_inputs = processor(text=captions_batch, images=None, return_tensors="pt", padding=True).to(DEVICE)
-            label_emb = model.get_text_features(**label_inputs).detach().to(DEVICE).numpy()
+            label_emb = model.get_text_features(**label_inputs).detach().cpu().numpy()
             label_emb = label_emb / np.linalg.norm(label_emb, axis=1, keepdims=True)
             
         # Compute the similarity scores
