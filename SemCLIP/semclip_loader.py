@@ -1,0 +1,56 @@
+import os
+import torch.nn as nn
+
+from transformers import CLIPModel, CLIPConfig
+from huggingface_hub import hf_hub_download
+from safetensors.torch import load_file
+from dotenv import load_dotenv
+
+from SemCLIP.image_utils import DEVICE
+from config import model_mapper
+
+
+load_dotenv()
+
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+
+class SemCLIPLoader(CLIPModel):
+    def __init__(self, config):
+        super().__init__(config)
+        self.vision_model.embeddings.patch_embedding = nn.Linear(
+            config.vision_config.patch_size * config.vision_config.patch_size * config.vision_config.num_channels,
+            config.vision_config.hidden_size,
+            bias=False
+        )
+        self.vision_model.embeddings.position_embedding = nn.Linear(4, config.vision_config.hidden_size, bias=False)
+
+    @classmethod
+    def load_finetuned_model(cls, model_name, ignore_mismatched_sizes=True, verbose=False, **kwargs):
+        hf_model_name = model_mapper[model_name]
+        config = CLIPConfig.from_pretrained(hf_model_name, token=HF_TOKEN)
+        model = cls(config)
+        
+        # Load state dict from the safetensors file        
+        state_dict_path = hf_hub_download(repo_id=hf_model_name, filename="model.safetensors", use_auth_token=HF_TOKEN)
+        state_dict = load_file(state_dict_path, device="cpu")
+        print(f'device: {DEVICE}')
+
+        # Extract and reshape weights for custom layers
+        patch_embedding_weight = state_dict.pop('vision_model.embeddings.patch_embedding.weight')
+        position_embedding_weight = state_dict.pop('vision_model.embeddings.position_embedding.weight')
+
+        model.load_state_dict(state_dict, strict=False)  # Load the remaining weights
+
+        # Manually load custom layer weights
+        model.vision_model.embeddings.patch_embedding.weight.data = patch_embedding_weight
+        model.vision_model.embeddings.position_embedding.weight.data = position_embedding_weight
+        
+        if verbose:
+            print(f'vision_model patch_embedding_shape: {patch_embedding_weight.shape}')
+            print(f'vision_model patch_embedding_weight: {patch_embedding_weight}')
+            print(f'vision_model position_embedding_shape: {position_embedding_weight.shape}')
+            print(f'vision_model position_embedding_weight: {position_embedding_weight}')
+
+        return model
+    
