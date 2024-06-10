@@ -1,4 +1,6 @@
 import os
+
+import torch
 import torch.nn as nn
 
 from transformers import CLIPModel, CLIPConfig
@@ -39,6 +41,12 @@ class SemCLIPLoader(CLIPModel):
         # Extract and reshape weights for custom layers
         patch_embedding_weight = state_dict.pop('vision_model.embeddings.patch_embedding.weight')
         position_embedding_weight = state_dict.pop('vision_model.embeddings.position_embedding.weight')
+        
+        # Convert weights to float32 if they are in float16
+        if patch_embedding_weight.dtype == torch.float16:
+            patch_embedding_weight = patch_embedding_weight.to(torch.float32)
+        if position_embedding_weight.dtype == torch.float16:
+            position_embedding_weight = position_embedding_weight.to(torch.float32)
 
         model.load_state_dict(state_dict, strict=False)  # Load the remaining weights
 
