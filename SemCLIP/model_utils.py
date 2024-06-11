@@ -6,8 +6,7 @@ import torch.nn as nn
 def convert_models_to_fp32(model): 
     for p in model.parameters(): 
         p.data = p.data.float() 
-        if p.grad is not None:
-            p.grad.data = p.grad.data.float()
+        p.grad.data = p.grad.data.float()
 
 def convert_models_to_fp16(model):
     for module in model.modules():
