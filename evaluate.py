@@ -9,7 +9,7 @@ from SemCLIP.semclip import SemCLIP
 from SemCLIP.image_utils import DEVICE, create_batches, pil_to_cv2
 from config import model_mapper, dataset_mapper
 
-from transformers import CLIPProcessor, CLIPModel
+from transformers import CLIPProcessor, CLIPModel, AutoModel, AutoProcessor
 from datasets import load_dataset
 from typing import Optional
 from PIL import Image
@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 def evaluate_semclip_model(
     # SemCLIP related parameters
-    model_name: str = 'clip', # base model i.e SemCLIP wrapper over CLIP, set to semclip variant from config to evaluate finetuned SemCLIP
+    model_name: str = 'semclip-v4', # base model i.e SemCLIP wrapper over CLIP, set to semclip variant from config to evaluate finetuned SemCLIP
     pool_type: str = 'attention',
     projection_dim: int = 512,
     multi_threading: bool = False,
@@ -29,8 +29,11 @@ def evaluate_semclip_model(
     data_split: str = 'test',
     data_subset: Optional[int] = None,
     eval_run_name: str = 'text',
+    use_finetuned: bool = False,
+    verbose: bool = True, # print semclip weights and shape to double check
 ):
     # Load SemCLIP model
+    fine_tuned_model = model_name if use_finetuned else None
     semclip = SemCLIP(
         model_name=model_mapper[model_name],
         pool_type=pool_type,
@@ -38,6 +41,8 @@ def evaluate_semclip_model(
         device=DEVICE,
         text_pos_emb_2d=text_pos_emb_2d, # 1D positional embeddings for text by default
         ignore_mismatched_sizes=True if model_name.startswith('semclip') else False,
+        fine_tuned_model=fine_tuned_model,
+        verbose=verbose,
     ).to(DEVICE)
     
     # Load the dataset
@@ -119,8 +124,8 @@ def evaluate_clip_model(
     eval_run_name: str = 'text',
 ):
     # Load the model and processor
-    model = CLIPModel.from_pretrained(model_mapper[model_name]).to(DEVICE)
-    processor = CLIPProcessor.from_pretrained(model_mapper[model_name])
+    model = AutoModel.from_pretrained(model_mapper[model_name]).to(DEVICE)
+    processor = AutoProcessor.from_pretrained(model_mapper[model_name])
     
     # Load the dataset
     dataset = load_dataset(dataset_mapper[data])
@@ -197,6 +202,8 @@ if __name__ == '__main__':
     parser.add_argument('--projection_dim', type=int, default=512, help='Projection dimension for SemCLIP')
     parser.add_argument('--multi_threading', action='store_true', help='Use multi-threading for SemCLIP')
     parser.add_argument('--text_pos_emb_2d', action='store_true', help='Use 2D positional embeddings for text in SemCLIP')
+    parser.add_argument('--use_finetuned', action='store_true', help='Use fine-tuned SemCLIP model')
+    parser.add_argument('--verbose', action='store_true', help='Print model weights and shapes') # print semclip updated layers weights and shape to double check
     
     args = parser.parse_args()
     
@@ -221,4 +228,6 @@ if __name__ == '__main__':
             data_split=args.data_split,
             data_subset=args.data_subset,
             eval_run_name=args.eval_run_name,
+            use_finetuned=args.use_finetuned,
+            verbose=args.verbose,
         )
