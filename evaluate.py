@@ -30,7 +30,7 @@ def evaluate_semclip_model(
     data_subset: Optional[int] = None,
     eval_run_name: str = 'text',
     use_finetuned: bool = False,
-    verbose: bool = True, # print semclip weights and shape to double check
+    verbose: bool = False, # print semclip weights and shape to double check
 ):
     # Load SemCLIP model
     fine_tuned_model = model_name if use_finetuned else None
