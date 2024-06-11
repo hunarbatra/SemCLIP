@@ -14,6 +14,7 @@ from typing import Optional
 from .semclip_tokenization import preprocess_patches
 from .semclip_vision import SemCLIPVision
 from .semclip_text import SemCLIPText
+from .semclip_loader import SemCLIPLoader
 from .image_utils import convert_patches_to_pixel_values, DEVICE
 
 
@@ -34,6 +35,7 @@ class SemCLIPImageFeatures():
         image_embeds = self.visual_projection(pooled_output)
         return image_embeds
 
+
 class SemCLIPTextFeatures():
     def __init__(self, text_config, tokenizer, text_model, text_projection, pool_type, text_pos_emb_2d=False, device=DEVICE):
         self.device = device
@@ -42,7 +44,6 @@ class SemCLIPTextFeatures():
         self.text_projection = text_projection
         
         self.text_pos_emb_2d = text_pos_emb_2d
-
 
     def forward(self, text):
         if self.text_pos_emb_2d:
@@ -57,6 +58,7 @@ class SemCLIPTextFeatures():
         
         return text_embeds
 
+
 class SemCLIP(nn.Module):
     def __init__(
         self, 
@@ -66,42 +68,52 @@ class SemCLIP(nn.Module):
         ignore_mismatched_sizes=False, 
         text_pos_emb_2d=False,
         device=DEVICE,
+        fine_tuned_model=None,
+        verbose=False,
     ):
         super(SemCLIP, self).__init__()
         self.device = device
         self.ignored_mismatched_sizes = ignore_mismatched_sizes
         self.text_pos_emb_2d = text_pos_emb_2d
         
-        self.model = CLIPModel.from_pretrained(
-            model_name, 
-            token=HF_TOKEN, 
-            ignore_mismatched_sizes=self.ignored_mismatched_sizes
-        ).to(device)
+        if fine_tuned_model is not None:
+            self.model = SemCLIPLoader.load_finetuned_model(fine_tuned_model, text_pos_emb_2d=text_pos_emb_2d, verbose=verbose).to(device)
+        else:
+            self.model = CLIPModel.from_pretrained(
+                model_name, 
+                token=HF_TOKEN, 
+                ignore_mismatched_sizes=self.ignored_mismatched_sizes
+            ).to(device)
         
-        # Modify specific layers
-        self.model.vision_model.embeddings.patch_embedding = nn.Linear(
-            self.model.vision_model.config.patch_size * self.model.vision_model.config.patch_size * self.model.vision_model.config.num_channels, 
-            self.model.vision_model.config.hidden_size, 
-            bias=False
-        ).to(device) # updated patch embedding layer
-        self.model.vision_model.embeddings.position_embedding = nn.Linear(4, self.model.vision_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for vision model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
-        if self.text_pos_emb_2d: # 2D positional embeddings for text
-            self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
-
+            # Modify specific layers
+            self.model.vision_model.embeddings.patch_embedding = nn.Linear(
+                self.model.vision_model.config.patch_size * self.model.vision_model.config.patch_size * self.model.vision_model.config.num_channels, 
+                self.model.vision_model.config.hidden_size, 
+                bias=False
+            ).to(device) # updated patch embedding layer
+            self.model.vision_model.embeddings.position_embedding = nn.Linear(4, self.model.vision_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for vision model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
+        
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.patch_processor = CLIPImageProcessor(do_resize=False, do_center_crop=False)  # disable image resizing and center cropping
         self.pool_type = pool_type
+
+        if self.text_pos_emb_2d: # 2D positional embeddings for text
+            self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
+            self.text_model = SemCLIPText(self.model.text_model, self.model.text_model.config, self.tokenizer, self.pool_type) # use 2D positional embeddings for text or original 1D positional embeddings (default: False)
 
         if projection_dim is not None:
             self.model.vision_model.config.projection_dim = projection_dim
             self.model.text_model.config.projection_dim = projection_dim
 
         self.vision_model = SemCLIPVision(self.model.vision_model, self.model.vision_model.config, self.pool_type)
-        self.text_model = SemCLIPText(self.model.text_model, self.model.text_model.config, self.tokenizer, self.pool_type) if self.text_pos_emb_2d else self.model.text_model # use 2D positional embeddings for text or original 1D positional embeddings (default: False)
 
         self.vision_features_extractor = SemCLIPImageFeatures(self.model.vision_model.config, self.vision_model, self.model.visual_projection, self.pool_type)
-        self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.text_model, self.model.text_projection, self.pool_type, self.text_pos_emb_2d)
+        
+        if self.text_pos_emb_2d:
+            self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.text_model, self.model.text_projection, self.pool_type, self.text_pos_emb_2d)
+        else:
+            self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.model.text_model, self.model.text_projection, self.pool_type, self.text_pos_emb_2d)
         
         print(f'Using 2D position embeddings for text_model: {self.text_pos_emb_2d}')
 
@@ -211,8 +223,10 @@ class SemCLIP(nn.Module):
             commit_message = "Add model files"
 
         self.model.save_pretrained(model_name)
+        self.model.config.save_pretrained(model_name)
         self.tokenizer.save_pretrained(model_name)
         self.processor.save_pretrained(model_name)
+        
         repo.push_to_hub(commit_message=commit_message)
         
 
