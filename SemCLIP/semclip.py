@@ -191,8 +191,12 @@ class SemCLIP(nn.Module):
                 return image_embeddings, text_embeddings
         else:
             # raw embeddings in images and text
-            image_embeddings = [images]
-            text_embeddings = [texts]
+            if isinstance(images, torch.Tensor):
+                image_embeddings = [images]
+                text_embeddings = [texts]
+            else:
+                image_embeddings = images
+                text_embeddings = texts
 
         image_embeddings = torch.cat(image_embeddings, dim=0).to(self.device)
         text_embeddings = torch.cat(text_embeddings, dim=0).to(self.device)
