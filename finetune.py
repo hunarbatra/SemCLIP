@@ -66,7 +66,8 @@ def train_model(
         "text_2d_pos_emb": text_pos_emb_2d,
     }
 
-    if DEVICE == "cpu":
+    if DEVICE == torch.device("cpu"):
+        print("Using CPU")
         semclip.model.float() # convert the model params to float if using CPU
 
     optimizer = torch.optim.Adam(semclip.model.parameters(), lr=learning_rate, betas=betas, eps=epsilon, weight_decay=weight_decay)
@@ -74,18 +75,19 @@ def train_model(
     if lr_scheduler is not None:
         if lr_scheduler == 'cosine':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, 
-                T_max=num_epochs
-            )
+                            optimizer, 
+                            T_max=num_epochs
+                        )
         elif lr_scheduler == 'reduce': # reduce on plateau
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 
-                               mode='min',
-                               factor=0.3, 
-                               patience=5,
-                               verbose=True,
-                               min_lr=1e-6,
-                               threshold=0.01,
-                               threshold_mode='abs'
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                            optimizer, 
+                            mode='min',
+                            factor=0.3, 
+                            patience=5,
+                            verbose=True,
+                            min_lr=1e-6,
+                            threshold=0.01,
+                            threshold_mode='abs'
                         )
 
     loss_fn = torch.nn.CrossEntropyLoss()
@@ -134,7 +136,7 @@ def train_model(
             # Convert the batch of PIL images to OpenCV images
             image_batch_cv2 = [pil_to_cv2(img) for img in image_batch_pil]
             
-            if DEVICE != "cpu":
+            if DEVICE != torch.device("cpu"):
                 convert_models_to_fp32(semclip.model)
 
             # Forward pass through the model
@@ -142,7 +144,7 @@ def train_model(
                 logits_per_image, logits_per_text = semclip(images=image_batch_cv2, texts=text_batch, multi_threading=multi_threading)
             except Exception as e:
                 return ValueError(f"error: {e}; images batch being processed: {batch['image']}")
-                
+            
             # Compute the loss
             ground_truth = torch.arange(len(logits_per_text), device=DEVICE).long()
             text_loss = loss_fn(logits_per_text, ground_truth) # contrastive loss
@@ -153,7 +155,7 @@ def train_model(
             total_loss.backward()
             
             # if the device is CPU, directly update the model
-            if DEVICE == "cpu":
+            if DEVICE == torch.device("cpu"):
                 optimizer.step()
             else:
                 convert_models_to_fp32(semclip.model)

@@ -4,9 +4,9 @@ import torch.nn as nn
 
 
 def convert_models_to_fp32(model): 
-    for p in model.parameters(): 
+    for name, p in model.named_parameters(): 
         p.data = p.data.float() 
-        p.grad.data = p.grad.data.float()
+        p.grad.data = p.grad.data.float() # float32
 
 def convert_models_to_fp16(model):
     for module in model.modules():
