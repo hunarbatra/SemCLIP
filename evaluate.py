@@ -70,7 +70,7 @@ def evaluate_semclip_model(
         # Get the images and captions for the batch
         image_batch_pil = batch[data_img_key]
         captions_batch = batch[data_text_key]
-        images_names = batch[image_idx_key]
+        images_names = batch[data_img_idx_key]
         
         # Convert the batch of PIL images to OpenCV images
         image_batch_cv2 = [pil_to_cv2(img) for img in image_batch_pil]
