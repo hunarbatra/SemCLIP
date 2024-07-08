@@ -26,9 +26,9 @@ def evaluate_semclip_model(
     # evaluation parameters
     data: str = 'COCO-13k',
     batch_size: int = 64,
-    data_split: str = 'test',
+    data_split: str = 'validation',
     data_subset: Optional[int] = None,
-    eval_run_name: str = 'text',
+    eval_run_name: str = 'test',
     use_finetuned: bool = False,
     max_batch: bool = False, #  to get names of all the classes in the dataset as the set of potential text pairings and predict the most probable -- CLIP Zero-shot eval
     verbose: bool = False, # print semclip weights and shape to double check,
@@ -77,153 +77,48 @@ def evaluate_semclip_model(
         
         with torch.no_grad():
             # Get the image features
-            image_features, label_features = semclip(
+            logits_per_image, logits_per_text = semclip(
                 images=image_batch_cv2, 
                 texts=captions_batch, 
-                multi_threading=multi_threading,
-                return_features=True
+                multi_threading=multi_threading
             )
-            
-            # Convert the features list[torch.tensor] to numpy arrays
-            # remove the extra dim [1, 1, 512] -> [1, 512] with squeeze()
-            image_features = np.array([img_feat.detach().cpu().squeeze().numpy() for img_feat in image_features])
-            label_features = np.array([label_feat.detach().cpu().squeeze().numpy() for label_feat in label_features])
-            
-            img_emb = image_features / np.linalg.norm(image_features, axis=1, keepdims=True)
-            label_emb = label_features / np.linalg.norm(label_features, axis=1, keepdims=True)
         
-        # Compute the similarity scores
-        scores = np.dot(img_emb, label_emb.T)
-        predictions.append(np.argmax(scores, axis=1))
+        probs = logits_per_image.softmax(dim=1)
+        preds = probs.argmax(dim=1) # get the predicted class index for each image
         
-        # Compute the number of correct predictions
-        for i, pred_idx in enumerate(predictions[0]):
-            is_correct = int(captions_batch[pred_idx] == captions_batch[i])
-            cosine_score = float(scores[i][pred_idx])
+        for i, pred_idx in enumerate(preds):
+            is_correct = int(captions_batch[pred_idx] == captions_batch[i]) # check if predicted caption == true caption
+            cosine_score = float(logits_per_image[i][pred_idx]) # get the cosine score for each image for the predicted class (caption)
             results.append({
                 "image_name": images_names[i], 
-                "data_name": dataset_mapper[data], 
-                "model_name": model_mapper[model_name],
+                "data_name": dataset_mapper[data],
+                "model_name": model_mapper[model_name], 
                 "caption": captions_batch[i], 
-                "prediction": captions_batch, 
-                "caption_idx": i, 
-                "prediction_idx": pred_idx, 
+                "prediction": captions_batch,
+                "caption_idx": i,
+                "prediction_idx": pred_idx,
                 "is_correct": is_correct,
                 "cosine_score": cosine_score,
             })
                 
-        print(f'Correct predictions % so far: {np.mean([r["is_correct"] for r in results])}')
         print(f'Avg Cosine Similarity Score so far: {np.mean([r["cosine_score"] for r in results])}')
+        print(f'Avg Zero-shot Accuracy so far: {np.mean([r["is_correct"] for r in results])}')
         
     results_df = pd.DataFrame(results)
     
     accuracy = np.mean(results_df['is_correct'])
-    print(f'Zero-shot top-1 Accuracy: {accuracy}, std: {np.std(results_df["is_correct"])}')
-    print(f'Avg Cosine Similarity Score: {np.mean(results_df["cosine_score"])}, std: {np.std(results_df["cosine_score"])}')
+    print(f'Zero-shot top-1 Accuracy: {accuracy * 100:.2f}%, std err: {np.std(results_df["is_correct"]) / np.sqrt(len(results_df["is_correct"])) * 100:.2f}%')
+    print(f'Avg Cosine Similarity Score: {np.mean(results_df["cosine_score"])}, std err: {np.std(results_df["cosine_score"]) / np.sqrt(len(results_df["cosine_score"])):.2f}%')
     
     os.makedirs(f'experiments/{eval_run_name}', exist_ok=True)
     file_name = model_mapper[model_name].split('/')[-1]
     results_df.to_csv(f'experiments/{eval_run_name}/{data}_{file_name}.csv')
     
-# def evaluate_semclip_model_cosine(
-#     # SemCLIP related parameters
-#     model_name: str = 'semclip-v4', # base model i.e SemCLIP wrapper over CLIP, set to semclip variant from config to evaluate finetuned SemCLIP
-#     pool_type: str = 'attention',
-#     projection_dim: int = 512,
-#     multi_threading: bool = False,
-#     text_pos_emb_2d: bool = False,
-#     # evaluation parameters
-#     data: str = 'COCO-13k',
-#     batch_size: int = 64,
-#     data_split: str = 'test',
-#     data_subset: Optional[int] = None,
-#     eval_run_name: str = 'text',
-#     use_finetuned: bool = False,
-#     verbose: bool = False, # print semclip weights and shape to double check
-# ):
-#     # Load SemCLIP model
-#     fine_tuned_model = model_name if use_finetuned else None
-#     semclip = SemCLIP(
-#         model_name=model_mapper[model_name],
-#         pool_type=pool_type,
-#         projection_dim=projection_dim,
-#         device=DEVICE,
-#         text_pos_emb_2d=text_pos_emb_2d, # 1D positional embeddings for text by default
-#         ignore_mismatched_sizes=True if model_name.startswith('semclip') else False,
-#         fine_tuned_model=fine_tuned_model,
-#         verbose=verbose,
-#     ).to(DEVICE)
-    
-#     # Load the dataset
-#     dataset = load_dataset(dataset_mapper[data])
-#     if data_subset:
-#         dataset = dataset[data_split].select(range(data_subset))
-#     else:
-#         dataset = dataset[data_split]
-#     test_loader = create_batches(dataset, batch_size)
-        
-#     results = []
-#     pbar = tqdm(test_loader, total=len(dataset) // batch_size)
-    
-#     data_img_key = dataset_keys[data]['img']
-#     data_text_key = dataset_keys[data]['text']
-#     data_img_idx_key = dataset_keys[data]['img_idx']
-    
-#     semclip.model.eval() # Set the model to evaluation mode
-    
-#     for batch_idx, batch in enumerate(pbar):
-#         predictions = []
-        
-#         # Get the images and captions for the batch
-#         image_batch_pil = batch[data_img_key]
-#         captions_batch = batch[data_text_key]
-#         images_names = batch[data_img_idx_key]
-        
-#         # Convert the batch of PIL images to OpenCV images
-#         image_batch_cv2 = [pil_to_cv2(img) for img in image_batch_pil]
-        
-#         with torch.no_grad():
-#             # Get the image features / embeddings
-#             image_features, label_features = semclip(
-#                 images=image_batch_cv2, 
-#                 texts=captions_batch, 
-#                 multi_threading=multi_threading,
-#                 return_features=True
-#             )
-            
-#             # cosine similarity score between image and text embeddings
-#             logits_per_image, logits_per_text = semclip(
-#                 images=image_features,
-#                 texts=label_features,
-#                 raw_embeds=True
-#             )
-        
-#         for i, cos_score in enumerate(logits_per_image):
-#             curr_score = float(cos_score[0])
-#             results.append({
-#                 "image_name": images_names[i], 
-#                 "data_name": dataset_mapper[data], 
-#                 "model_name": model_mapper[model_name],
-#                 "caption": captions_batch[i], 
-#                 "cosine_score": curr_score
-#             })
-                
-#         print(f'Avg Cosine Similarity Score so far: {np.mean([r["cosine_score"] for r in results])}')
-        
-#     results_df = pd.DataFrame(results)
-    
-#     accuracy = np.mean(results_df['cosine_score'])
-#     print(f'Avg Cosine Similarity Score: {accuracy}')
-    
-#     os.makedirs(f'experiments/{eval_run_name}', exist_ok=True)
-#     file_name = model_mapper[model_name].split('/')[-1]
-#     results_df.to_csv(f'experiments/{eval_run_name}/{data}_cosine_{file_name}.csv')
-
 def evaluate_clip_model(
     model_name: str = 'clip',
     batch_size: int = 64,
     data: str = 'COCO-13k',
-    data_split: str = 'test',
+    data_split: str = 'validation',
     data_subset: Optional[int] = None,
     eval_run_name: str = 'text',
     max_batch: bool = False, #  to get names of all the classes in the dataset as the set of potential text pairings and predict the most probable -- CLIP Zero-shot eval
@@ -261,135 +156,127 @@ def evaluate_clip_model(
         
         images_batch_cv2 = [pil_to_cv2(img) for img in images_batch]
         
-        with torch.no_grad():
-            # Get the image features
-            image_inputs = processor(images=images_batch_cv2, return_tensors="pt")['pixel_values'].to(DEVICE)
-            # img_emb = model.get_image_features(image_inputs).detach().cpu().numpy()
-            img_emb = model.get_image_features(image_inputs)
-            img_emb = img_emb / img_emb.norm(p=2, dim=-1, keepdim=True)
-            img_emb = img_emb.detach().cpu().numpy()
-            # img_emb = img_emb / np.linalg.norm(img_emb, axis=1, keepdims=True)
-            
-            # Get the text features
-            label_inputs = processor(text=captions_batch, return_tensors="pt", padding="max_length").to(DEVICE)
-            # label_emb = model.get_text_features(**label_inputs).detach().cpu().numpy()
-            label_emb = model.get_text_features(**label_inputs)
-            label_emb = label_emb / label_emb.norm(p=2, dim=-1, keepdim=True)
-            label_emb = label_emb.detach().cpu().numpy()
-            # label_emb = label_emb / np.linalg.norm(label_emb, axis=1, keepdims=True)
-            
-        # Compute the similarity scores
-        scores = np.dot(img_emb, label_emb.T)
-        predictions.append(np.argmax(scores, axis=1))
+        inputs = processor(text=captions_batch, images=images_batch_cv2, return_tensors="pt", padding=True).to(DEVICE)
+        outputs = model(**inputs)
         
-        # Compute the number of correct predictions
-        for i, pred_idx in enumerate(predictions[0]):
-            is_correct = int(captions_batch[pred_idx] == captions_batch[i])
-            cosine_score = float(scores[i][pred_idx])
+        logits_per_image = outputs.logits_per_image
+        probs = logits_per_image.softmax(dim=1)
+        preds = probs.argmax(dim=1) # get the predicted class index for each image
+        
+        for i, pred_idx in enumerate(preds):
+            pred_idx = pred_idx.item()
+            is_correct = int(captions_batch[pred_idx] == captions_batch[i]) # check if predicted caption == true caption
+            cosine_score = float(logits_per_image[i][pred_idx]) # get the cosine score for each image for the predicted class (caption)
             results.append({
-                "image_name": images_names[i], 
-                "data_name": dataset_mapper[data], 
+                "image_name": images_names[i],
+                "data_name": dataset_mapper[data],
                 "model_name": model_mapper[model_name],
-                "caption": captions_batch[i], 
-                "prediction": captions_batch, 
-                "caption_idx": i, 
-                "prediction_idx": pred_idx, 
+                "caption": captions_batch[i],
+                "prediction": captions_batch,
+                "caption_idx": i,
+                "prediction_idx": pred_idx,
                 "is_correct": is_correct,
                 "cosine_score": cosine_score,
             })
                 
-        print(f'Correct predictions % so far: {np.mean([r["is_correct"] for r in results])}')
-        print(f'Avg Cosine Similarity Score so far: {np.mean([r["cosine_score"] for r in results])}')
+        print(f'Correct predictions % so far: {np.mean([r["is_correct"] for r in results])}, std err: {np.std([r["is_correct"] for r in results]) / np.sqrt(len([r["is_correct"] for r in results]))}')
+        print(f'Avg Cosine Similarity Score so far: {np.mean([r["cosine_score"] for r in results])}, std err: {np.std([r["cosine_score"] for r in results]) / np.sqrt(len([r["cosine_score"] for r in results]))}')
         
     results_df = pd.DataFrame(results)
     
     accuracy = np.mean(results_df['is_correct'])
-    print(f'Zero-shot top-1 Accuracy: {accuracy}, std: {np.std(results_df["is_correct"])}')
-    print(f'Avg Cosine Similarity Score: {np.mean(results_df["cosine_score"])}, std: {np.std(results_df["cosine_score"])}')
+    print(f'Zero-shot top-1 Accuracy: {accuracy}, std err: {np.std(results_df["is_correct"]) / np.sqrt(len(results_df["is_correct"]))}')
+    print(f'Avg Cosine Similarity Score: {np.mean(results_df["cosine_score"])}, std err: {np.std(results_df["cosine_score"]) / np.sqrt(len(results_df["cosine_score"]))}')
     
     os.makedirs(f'experiments/{eval_run_name}', exist_ok=True)
     file_name = model_mapper[model_name].split('/')[-1]
     results_df.to_csv(f'experiments/{eval_run_name}/{data}_{file_name}.csv')
+
+def evaluate_siglip_model(
+    model_name: str = 'siglip',
+    batch_size: int = 64,
+    data: str = 'COCO-13k',
+    data_split: str = 'validation',
+    data_subset: Optional[int] = None,
+    eval_run_name: str = 'text',
+    max_batch: bool = False, #  to get names of all the classes in the dataset as the set of potential text pairings and predict the most probable -- CLIP Zero-shot eval
+):
+    # Load the model and processor
+    model = AutoModel.from_pretrained(model_mapper[model_name]).to(DEVICE)
+    processor = AutoProcessor.from_pretrained(model_mapper[model_name])
+    tokenizer = AutoTokenizer.from_pretrained(model_mapper[model_name])
     
-# def evaluate_clip_model_cosine(
-#     model_name: str = 'clip',
-#     batch_size: int = 64,
-#     data: str = 'COCO-13k',
-#     data_split: str = 'test',
-#     data_subset: Optional[int] = None,
-#     eval_run_name: str = 'text',
-# ):
-#     # Load the model and processor
-#     model = AutoModel.from_pretrained(model_mapper[model_name]).to(DEVICE)
-#     processor = AutoProcessor.from_pretrained(model_mapper[model_name])
+    # Load the dataset
+    dataset = load_dataset(dataset_mapper[data])
+    if data_subset:
+        dataset = dataset[data_split].select(range(data_subset))
+    else:
+        dataset = dataset[data_split]
+    test_loader = create_batches(dataset, batch_size)
     
-#     # Load the dataset
-#     dataset = load_dataset(dataset_mapper[data])
-#     if data_subset:
-#         dataset = dataset[data_split].select(range(data_subset))
-#     else:
-#         dataset = dataset[data_split]
-#     test_loader = create_batches(dataset, batch_size)
+    results = []
+    batch_size = batch_size if not max_batch else len(dataset)
+    pbar = tqdm(test_loader, total=len(dataset) // batch_size)
     
-#     results = []
-#     pbar = tqdm(test_loader, total=len(dataset) // batch_size)
+    data_img_key = dataset_keys[data]['img']
+    data_text_key = dataset_keys[data]['text']
+    data_img_idx_key = dataset_keys[data]['img_idx']
     
-#     data_img_key = dataset_keys[data]['img']
-#     data_text_key = dataset_keys[data]['text']
-#     data_img_idx_key = dataset_keys[data]['img_idx']
+    model.eval() # Set the model to evaluation mode
     
-#     model.eval() # Set the model to evaluation mode
-    
-#     for batch_idx, batch in enumerate(pbar):
-#         predictions = []
+    for batch_idx, batch in enumerate(pbar):
+        predictions = []
         
-#         # Get the images and captions for the batch
-#         images_batch = batch[data_img_key]
-#         captions_batch = batch[data_text_key]
-#         images_names = batch[data_img_idx_key]
+        # Get the images and captions for the batch
+        images_batch = batch[data_img_key]
+        captions_batch = batch[data_text_key]
+        images_names = batch[data_img_idx_key]
         
-#         images_batch_cv2 = [pil_to_cv2(img) for img in images_batch]
+        images_batch_cv2 = [pil_to_cv2(img) for img in images_batch]
         
-#         with torch.no_grad():
-#             inputs = processor(text=captions_batch, images=images_batch_cv2, return_tensors="pt", padding="max_length")
-#             outputs = model(input_ids=inputs["input_ids"].to(DEVICE), pixel_values=inputs["pixel_values"].to(DEVICE))
+        inputs = processor(text=captions_batch, images=images_batch_cv2, return_tensors="pt", padding="max_length").to(DEVICE)
+        outputs = model(**inputs)
         
-#         # Get the cosine similarity scores
-#         logits_per_image = outputs.logits_per_image # image text similarity
+        logits_per_image = outputs.logits_per_image
+        probs = torch.sigmoid(logits_per_image)
+        preds = probs.argmax(dim=1) # get the predicted class index for each image
         
-#         print(f'logits_per_image[0]: {logits_per_image[0]}')
-#         print(f'len(logits_per_image): {len(logits_per_image)}')
-        
-#         # Compute the number of correct predictions
-#         for i, cos_score in enumerate(logits_per_image):
-#             curr_score = float(cos_score[0])
-#             results.append({
-#                 "image_name": images_names[i], 
-#                 "data_name": dataset_mapper[data], 
-#                 "model_name": model_mapper[model_name],
-#                 "caption": captions_batch[i], 
-#                 "cosine_score": curr_score
-#             })
+        for i, pred_idx in enumerate(preds):
+            pred_idx = pred_idx.item()
+            is_correct = int(captions_batch[pred_idx] == captions_batch[i]) # check if predicted caption == true caption
+            cosine_score = float(logits_per_image[i][pred_idx]) # get the cosine score for each image for the predicted class (caption)
+            results.append({
+                "image_name": images_names[i],
+                "data_name": dataset_mapper[data],
+                "model_name": model_mapper[model_name],
+                "caption": captions_batch[i],
+                "prediction": captions_batch,
+                "caption_idx": i,
+                "prediction_idx": pred_idx,
+                "is_correct": is_correct,
+                "cosine_score": cosine_score,
+            })
                 
-#         print(f'Avg Cosine Similarity Score so far: {np.mean([r["cosine_score"] for r in results])}')
+        print(f'Correct predictions % so far: {np.mean([r["is_correct"] for r in results])}, std err: {np.std([r["is_correct"] for r in results]) / np.sqrt(len([r["is_correct"] for r in results]))}')
+        print(f'Avg Cosine Similarity Score so far: {np.mean([r["cosine_score"] for r in results])}, std err: {np.std([r["cosine_score"] for r in results]) / np.sqrt(len([r["cosine_score"] for r in results]))}')
         
-#     results_df = pd.DataFrame(results)
+    results_df = pd.DataFrame(results)
     
-#     accuracy = np.mean(results_df['cosine_score'])
-#     print(f'Avg Cosine Similarity Score: {accuracy}')
+    accuracy = np.mean(results_df['is_correct'])
+    print(f'Zero-shot top-1 Accuracy: {accuracy}, std err: {np.std(results_df["is_correct"]) / np.sqrt(len(results_df["is_correct"]))}')
+    print(f'Avg Cosine Similarity Score: {np.mean(results_df["cosine_score"])}, std err: {np.std(results_df["cosine_score"]) / np.sqrt(len(results_df["cosine_score"]))}')
     
-#     os.makedirs(f'experiments/{eval_run_name}', exist_ok=True)
-#     file_name = model_mapper[model_name].split('/')[-1]
-#     results_df.to_csv(f'experiments/{eval_run_name}/{data}_cosine_{file_name}.csv')
+    os.makedirs(f'experiments/{eval_run_name}', exist_ok=True)
+    file_name = model_mapper[model_name].split('/')[-1]
+    results_df.to_csv(f'experiments/{eval_run_name}/{data}_{file_name}.csv')
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Evaluate a model on a dataset')
-    parser.add_argument('--semclip', action='store_true', help='Evaluate SemCLIP model')
     parser.add_argument('--model_name', type=str, default='clip', help='Model to evaluate')
     parser.add_argument('--batch_size', type=int, default=64, help='Batch size for evaluation')
     parser.add_argument('--data', type=str, default='COCO-13k', help='Dataset to evaluate on')
-    parser.add_argument('--data_split', type=str, default='test', help='Dataset split to evaluate on')
+    parser.add_argument('--data_split', type=str, default='validation', help='Dataset split to evaluate on')
     parser.add_argument('--data_subset', type=int, default=None, help='Number of subset samples to evaluate on')
     parser.add_argument('--eval_run_name', type=str, default='text', help='Name of the evaluation run')
     parser.add_argument('--pool_type', type=str, default='attention', help='Pooling type for SemCLIP')
@@ -403,16 +290,7 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    if not args.semclip:
-        # if args.cosine:
-        #     evaluate_clip_model_cosine(
-        #         model_name=args.model_name,
-        #         batch_size=args.batch_size,
-        #         data=args.data,
-        #         data_split=args.data_split,
-        #         data_subset=args.data_subset,
-        #         eval_run_name=args.eval_run_name,
-        #     )
+    if args.model_name == 'clip':
         evaluate_clip_model(
             model_name=args.model_name,
             batch_size=args.batch_size,
@@ -422,22 +300,17 @@ if __name__ == '__main__':
             eval_run_name=args.eval_run_name,
             max_batch=args.max_batch,
         )
-    else:
-        # if args.cosine:
-        #     evaluate_semclip_model_cosine(
-        #         model_name=args.model_name,
-        #         pool_type=args.pool_type,
-        #         projection_dim=args.projection_dim,
-        #         multi_threading=args.multi_threading,
-        #         text_pos_emb_2d=args.text_pos_emb_2d,
-        #         data=args.data,
-        #         batch_size=args.batch_size,
-        #         data_split=args.data_split,
-        #         data_subset=args.data_subset,
-        #         eval_run_name=args.eval_run_name,
-        #         use_finetuned=args.use_finetuned,
-        #         verbose=args.verbose,
-        #     )
+    elif args.model_name == 'siglip':
+        evaluate_siglip_model(
+            model_name=args.model_name,
+            batch_size=args.batch_size,
+            data=args.data,
+            data_split=args.data_split,
+            data_subset=args.data_subset,
+            eval_run_name=args.eval_run_name,
+            max_batch=args.max_batch,
+        )   
+    elif args.model_name.startswith('semclip'):
         evaluate_semclip_model(
             model_name=args.model_name,
             pool_type=args.pool_type,
@@ -453,4 +326,6 @@ if __name__ == '__main__':
             verbose=args.verbose,
             max_batch=args.max_batch,
         )
-            
+    else:
+        raise ValueError(f'Invalid model name: {args.model_name}, set HuggingFace model config in config.py')
+    
