@@ -79,6 +79,7 @@ class SemCLIP(nn.Module):
         if fine_tuned_model is not None:
             self.model = SemCLIPLoader.load_finetuned_model(fine_tuned_model, text_pos_emb_2d=text_pos_emb_2d, verbose=verbose).to(device)
         else:
+            self.ignored_mismatched_sizes = True
             self.model = CLIPModel.from_pretrained(
                 model_name, 
                 token=HF_TOKEN, 
@@ -186,6 +187,13 @@ class SemCLIP(nn.Module):
                 for image, caption in zip(images, texts):
                     image_embedding, text_embedding = self.generate_image_text_embeddings(image, caption, image_folder)
                     image_embeddings.append(image_embedding)
+                    text_embeddings.append(text_embedding)
+            if len(texts) > len(images):
+                # process any additional text embeddings and append
+                for i in range(len(images), len(texts)):
+                    caption = self.tokenizer(texts[i], padding=True, return_tensors="pt").to(DEVICE)
+                    text_embedding = self.text_features_extractor.forward(caption)
+                    print(f'text_embedding.type: {type(text_embedding)}')
                     text_embeddings.append(text_embedding)
             if return_features:
                 return image_embeddings, text_embeddings
