@@ -19,5 +19,12 @@ model_mapper = {
     'clip': 'openai/clip-vit-base-patch32',
     'eva-clip': 'BAAI/EVA-CLIP-8B',
     'siglip': 'google/siglip-base-patch16-224',
-    'dinov2': 'facebook/dinov2-base',
+    'dinov2': 'facebook/dinov2-small-imagenet1k-1-layer',
+    'test-clip': 'hunarbatra/test-clip',
+    'semclip-test': 'hunarbatra/test-clip',
+    'semclip-v5-wip': 'hunarbatra/semclip-v5-wip',
+    'semclip-v5': 'hunarbatra/semclip-v5',
+    'clip-v1-test': 'hunarbatra/clip-v1-test',
+    'semclip-v5-fixed': 'hunarbatra/semclip-v5-fixed',
+    'semclip-v5-fixed-1e-4': 'hunarbatra/semclip-v5-fixed-1e-4',
 }
