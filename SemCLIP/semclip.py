@@ -16,6 +16,7 @@ from .semclip_vision import SemCLIPVision
 from .semclip_text import SemCLIPText
 from .semclip_loader import SemCLIPLoader
 from .image_utils import convert_patches_to_pixel_values, DEVICE
+from config import model_mapper
 
 
 load_dotenv()
@@ -37,21 +38,14 @@ class SemCLIPImageFeatures():
 
 
 class SemCLIPTextFeatures():
-    def __init__(self, text_config, tokenizer, text_model, text_projection, pool_type, text_pos_emb_2d=False, device=DEVICE):
+    def __init__(self, text_config, tokenizer, text_model, text_projection, pool_type, device=DEVICE):
         self.device = device
         
         self.text_model = text_model
         self.text_projection = text_projection
-        
-        self.text_pos_emb_2d = text_pos_emb_2d
 
     def forward(self, text):
-        if self.text_pos_emb_2d:
-            # SemCLIP text model forward pass which returns the pooled output
-            # applies text processor, generates SemCLIPTextEmbeddings with 2D positional embeddings, and passes through the CLIP transformer encoder followed by pooling 
-            pooled_output = self.text_model.forward(text)
-        else:
-            pooled_output = self.text_model(**text).pooler_output # HuggingFace text model with 1D positional embeddings
+        pooled_output = self.text_model(**text).pooler_output # HuggingFace text model with 1D positional embeddings
             
         # pass the pooled output through a final linear projection layer
         text_embeds = self.text_projection(pooled_output)
@@ -64,44 +58,35 @@ class SemCLIP(nn.Module):
         self, 
         model_name="openai/clip-vit-base-patch32", 
         pool_type='attention', 
-        projection_dim=None, 
-        ignore_mismatched_sizes=False, 
-        text_pos_emb_2d=False,
+        projection_dim=None,  
         device=DEVICE,
-        fine_tuned_model=None,
+        init_weights=False,
+        load_finetuned=True,
         verbose=False,
     ):
         super(SemCLIP, self).__init__()
         self.device = device
-        self.ignored_mismatched_sizes = ignore_mismatched_sizes
-        self.text_pos_emb_2d = text_pos_emb_2d
         
-        if fine_tuned_model is not None:
-            self.model = SemCLIPLoader.load_finetuned_model(fine_tuned_model, text_pos_emb_2d=text_pos_emb_2d, verbose=verbose).to(device)
-        else:
-            self.ignored_mismatched_sizes = True
-            self.model = CLIPModel.from_pretrained(
+        # if model_name not in model_mapper.values():
+        #     model_name = model_mapper[model_name]
+            
+        if load_finetuned and not init_weights:
+            self.model = SemCLIPLoader.load_finetuned_model(
                 model_name, 
-                token=HF_TOKEN, 
-                ignore_mismatched_sizes=self.ignored_mismatched_sizes
+                verbose=verbose,
             ).to(device)
-        
-            # Modify specific layers
-            self.model.vision_model.embeddings.patch_embedding = nn.Linear(
-                self.model.vision_model.config.patch_size * self.model.vision_model.config.patch_size * self.model.vision_model.config.num_channels, 
-                self.model.vision_model.config.hidden_size, 
-                bias=False
-            ).to(device) # updated patch embedding layer
-            self.model.vision_model.embeddings.position_embedding = nn.Linear(4, self.model.vision_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for vision model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for bbox coordinates
-        
+        elif init_weights and not load_finetuned:
+            self.model = SemCLIPLoader.init_model_for_finetuning(
+                model_name,
+                verbose=verbose,
+            ).to(device)
+        else:
+            raise ValueError(f"Invalid model loading option: [load_finetuned: {load_finetuned}, init_weights: {init_weights}], only one of them must be True")
+
         self.tokenizer = CLIPTokenizer.from_pretrained(model_name)
         self.processor = CLIPProcessor.from_pretrained(model_name)
         self.patch_processor = CLIPImageProcessor(do_resize=False, do_center_crop=False)  # disable image resizing and center cropping
         self.pool_type = pool_type
-
-        if self.text_pos_emb_2d: # 2D positional embeddings for text
-            self.model.text_model.embeddings.position_embedding = nn.Linear(4, self.model.text_model.config.hidden_size, bias=False).to(device) # updated position embedding layer for text model with 2D positional embeddings -- 4 for [x, y, w, h] - Positional embedding layer for token coordinates
-            self.text_model = SemCLIPText(self.model.text_model, self.model.text_model.config, self.tokenizer, self.pool_type) # use 2D positional embeddings for text or original 1D positional embeddings (default: False)
 
         if projection_dim is not None:
             self.model.vision_model.config.projection_dim = projection_dim
@@ -111,12 +96,7 @@ class SemCLIP(nn.Module):
 
         self.vision_features_extractor = SemCLIPImageFeatures(self.model.vision_model.config, self.vision_model, self.model.visual_projection, self.pool_type)
         
-        if self.text_pos_emb_2d:
-            self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.text_model, self.model.text_projection, self.pool_type, self.text_pos_emb_2d)
-        else:
-            self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.model.text_model, self.model.text_projection, self.pool_type, self.text_pos_emb_2d)
-        
-        print(f'Using 2D position embeddings for text_model: {self.text_pos_emb_2d}')
+        self.text_features_extractor = SemCLIPTextFeatures(self.model.text_model.config, self.tokenizer, self.model.text_model, self.model.text_projection, self.pool_type)
 
     def get_image_features(self, image_name: str, data_name: str, image_file: Optional[np.ndarray] = None, return_embeds=False):
         # load image segments patches and normalized bounding box coordinates
@@ -134,10 +114,7 @@ class SemCLIP(nn.Module):
         return image_features
 
     def get_text_features(self, text, return_embeds=False): 
-        if not self.text_pos_emb_2d:
-            # preprocess text if 1D positional embeddings are used
-            # SemCLIP 2D positional embeddings internally tokenizes the input text and passes it through the CLIP transformer encoder followed by pooling, so it's not needed there
-            text = self.tokenizer(text, padding=True, return_tensors="pt").to(DEVICE)
+        text = self.tokenizer(text, padding=True, return_tensors="pt").to(DEVICE)
             
         if not return_embeds:
             return text
@@ -157,9 +134,7 @@ class SemCLIP(nn.Module):
         image_patches, bbox_coords = self.get_image_features(image_name=image_name, data_name=image_folder, image_file=image_file, return_embeds=False)
         image_features = self.vision_features_extractor.forward(image_patches, bbox_coords)
         
-        if not self.text_pos_emb_2d:
-            # process text if 1D positional embeddings are being used
-            caption = self.tokenizer(caption, padding=True, return_tensors="pt").to(DEVICE)
+        caption = self.tokenizer(caption, padding=True, return_tensors="pt").to(DEVICE)
         text_features = self.text_features_extractor.forward(caption)
             
         return image_features, text_features
@@ -170,7 +145,7 @@ class SemCLIP(nn.Module):
         
         if not raw_embeds: # generate embeddings
             if multi_threading:
-                max_workers = min(len(images), 4) # max workers for ThreadPoolExecutor
+                max_workers = min(len(images), 2) # max workers for ThreadPoolExecutor
                 print(f'Running in parallel with {max_workers} workers')
                 
                 with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -193,7 +168,6 @@ class SemCLIP(nn.Module):
                 for i in range(len(images), len(texts)):
                     caption = self.tokenizer(texts[i], padding=True, return_tensors="pt").to(DEVICE)
                     text_embedding = self.text_features_extractor.forward(caption)
-                    print(f'text_embedding.type: {type(text_embedding)}')
                     text_embeddings.append(text_embedding)
             if return_features:
                 return image_embeddings, text_embeddings
@@ -250,15 +224,17 @@ if __name__ == "__main__":
     parser.add_argument("--projection_dim", type=int, default=None, help="custom projection dimension, default: 512")
     parser.add_argument("--model_name", type=str, default="openai/clip-vit-base-patch32", help="CLIP model name, default: openai/clip-vit-base-patch32")
     parser.add_argument("--text", type=str, default="a photo of a dog", help="text input")
-    parser.add_argument("--text_pos_emb_2d", action="store_true", help="Use 2D positional embeddings for text")
     args = parser.parse_args()
+    parser.add_argument("--init_weights", action="store_true", help="Initialize weights for finetuning")
+    parser.add_argument("--load_finetuned", action="store_true", help="Load finetuned model")
 
     semclip = SemCLIP(
         model_name=args.model_name, 
         pool_type=args.pool_type, 
         projection_dim=args.projection_dim, 
+        init_weights=args.init_weights,
+        load_finetuned=args.load_finetuned,
         device=DEVICE, 
-        text_pos_emb_2d=args.text_pos_emb_2d,
     )
     image_features = semclip.get_image_features(args.image_name, args.data_name, return_embeds=True)
     text_features = semclip.get_text_features(args.text, return_embeds=True)
