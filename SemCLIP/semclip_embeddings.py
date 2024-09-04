@@ -1,9 +1,13 @@
 import torch
 import torch.nn as nn
 
+import numpy as np
+
 from transformers.activations import ACT2FN
 
 from SemCLIP.image_utils import DEVICE
+
+from typing import List
 
 
 class CLIPMLP(nn.Module):
@@ -50,6 +54,7 @@ class SemCLIPVisionEmbeddings(nn.Module):
         self.num_patches = num_patches
         self.patch_size = config.patch_size
         self.num_channels = config.num_channels
+        self.num_patches = 50
 
         self.patch_dim = self.patch_size * self.patch_size * self.num_channels
 
@@ -60,28 +65,70 @@ class SemCLIPVisionEmbeddings(nn.Module):
         
         self.attn_pooling_head = SemCLIPMultiheadAttentionPoolingHead(config)
         
-    def forward(self, patch_list, bbox_coords):
+        # Register a buffer for positional IDs
+        self.register_buffer("position_ids", torch.arange(self.num_patches).expand((1, -1)), persistent=False)
+        
+    def forward(self, patch_list: List, bbox_coords):
         patch_tensor = torch.stack(patch_list, dim=0).to(DEVICE) # [batch_size, 1, 3, 32, 32]
         batch_size = patch_tensor.size(0)
         
         # process individual patch embeddings just like ViTs original implementation 
-        input_patch_tensor = patch_tensor.view(batch_size, self.num_channels, self.patch_size, self.patch_size) # [batch_size, 3, 32, 32]
-        input_patch_tensor = input_patch_tensor.view(batch_size, -1) # flatten the patches - [batch_size, 3072]
-        patch_norm = self.patch_norm1(input_patch_tensor) # apply layer norm (32*32*3) - shape: [batch_size, 3072]
-        patch_embed = self.model.embeddings.patch_embedding(patch_norm) # pass the patch through a linear layer (32*32*3, 768) - shape: [batch_size, 768]
+        input_patch_tensor = patch_tensor.view(batch_size, self.num_channels, self.patch_size, self.patch_size) # [num_patches, 3, 32, 32]
+        input_patch_tensor = input_patch_tensor.view(batch_size, -1) # flatten the patches - [num_patches, 3072]
+        patch_norm = self.patch_norm1(input_patch_tensor) # apply layer norm (32*32*3) - shape: [num_patches, 3072]
+        patch_embed = self.model.embeddings.patch_embedding(patch_norm) # pass the patch through a linear layer (32*32*3, 768) - shape: [num_patches, 768]
         patch_final = self.patch_norm2(patch_embed) # apply layer norm (768) - shape: [batch_size, 768]
-        patch_embeds = patch_final.unsqueeze(0) # [1, batch_size, 768]
-        
-        embeddings = torch.cat([self.model.embeddings.class_embedding.unsqueeze(0).unsqueeze(0), patch_embeds], dim=1)  # Concatenate class embeddings [1, 1, 768] to each patch embedding [1, batch_size, 768] (Concatenating along the patch dimension)
+        patch_embeds = patch_final.unsqueeze(0) # [1, num_patches, 768] -- 1 is the batch size here as currently we only process one image at a time, so we unsqueeze the batch dimension here
 
         # bbox positional embeddings
-        positional_embeddings = self.model.embeddings.position_embedding(bbox_coords).unsqueeze(0)
-        class_pos_embedding = self.class_position_embedding.unsqueeze(0)
-        positional_embeddings = torch.cat([class_pos_embedding, positional_embeddings], dim=1)
+        bbox_coords = self.map_bbox_to_patch_idx(bbox_coords)
+        sorted_patch_indices = torch.argsort(bbox_coords)
+        
+        # correctly ordered patch embeds based on their absolute position in the patch grid (1-49)
+        reordered_patch_embeds = patch_embeds[:, sorted_patch_indices, :]
+        
+        # concatenate class patch embeddings and patch embeddings
+        class_patch_embeds = self.model.embeddings.class_embedding.unsqueeze(0).unsqueeze(0) # [1, 1, 768]
+        embeddings = torch.cat([class_patch_embeds, reordered_patch_embeds], dim=1)  # Concatenate class embeddings [1, 1, 768] to each patch embedding [1, batch_size, 768] (Concatenating along the patch dimension)
+        
+        if embeddings.shape[1] < self.num_patches:
+            # it should be [1, 50, 768] so pad it if not
+            pad_patch_embeds = torch.zeros((1, self.num_patches - embeddings.shape[1], embeddings.shape[2]), dtype=embeddings.dtype, device=embeddings.device)
+            embeddings = torch.cat([embeddings, pad_patch_embeds], dim=1) # [1, 50, 768]
 
-        embeddings += positional_embeddings
+        # positional embeddings
+        position_ids = self.position_ids # [1, 50]
+        positional_embeddings = self.model.embeddings.position_embedding(position_ids) # [1, 50, 768]
+        
+        # add positional embeddings to patch embeddings
+        patch_embeddings = embeddings[:, :self.num_patches, :] # cap the patch embeddings to the number of patches - shape: [1, 50, 768]
+        
+        embeddings = patch_embeddings + positional_embeddings # shape: [1, 50, 768]
 
         return embeddings
+    
+    def map_bbox_to_patch_idx(self, bbox_coords):
+        patch_indices = []
+        image_size = 224
+        patch_size = 32
+        num_patches = 7
+
+        # Calculate the center coordinates
+        c_x = (bbox_coords[:, 0] + bbox_coords[:, 2] / 2) * image_size
+        c_y = (bbox_coords[:, 1] + bbox_coords[:, 3] / 2) * image_size
+        
+        # Determine the row and column in the patch grid
+        row = torch.floor(c_y / patch_size).long()
+        col = torch.floor(c_x / patch_size).long()
+        
+        # Ensure row and col are within bounds
+        row = torch.clamp(row, 0, num_patches - 1)
+        col = torch.clamp(col, 0, num_patches - 1)
+        
+        # Calculate the patch index (1-49)
+        patch_indices = row * num_patches + col + 1
+        
+        return patch_indices.to(DEVICE)
     
     
 class SemCLIPTextEmbeddings(nn.Module):
