@@ -10,6 +10,9 @@ import numpy as np
 from tqdm import tqdm
 from PIL import Image
 from datasets import load_dataset
+from dotenv import load_dotenv
+
+from transformers import CLIPModel, CLIPConfig
 
 from SemCLIP.semclip import SemCLIP
 from SemCLIP.image_utils import DEVICE, create_batches, pil_to_cv2
@@ -18,6 +21,9 @@ from config import dataset_mapper
 
 from typing import Optional
 
+
+load_dotenv()
+HF_USERNAME = os.getenv("HF_USERNAME")
 
 def train_model(
     base_model: str = 'openai/clip-vit-base-patch32', 
@@ -28,19 +34,55 @@ def train_model(
     train_name: str = 'semclip-v1', 
     batch_size: int = 64, 
     num_epochs: int = 3, 
-    lr: float = 5e-5,
+    lr: float = 1e-6,
     lr_scheduler: Optional[str] = None,
     multi_threading: bool = False,
-    text_pos_emb_2d: bool = False,
+    samclip_training: bool = False,
 ):
     # Initialize SemCLIP
-    semclip = SemCLIP(
-        model_name=base_model, 
-        pool_type=pool_type, 
-        projection_dim=projection_dim, 
-        device=DEVICE,
-        text_pos_emb_2d=text_pos_emb_2d, # use 2D positional embeddings for text or original 1D positional embeddings (default: False)
-    )
+    if not resume_training:
+        semclip = SemCLIP(
+            model_name=base_model, 
+            pool_type=pool_type, 
+            projection_dim=projection_dim, 
+            device=DEVICE,
+            init_weights=True,
+            load_finetuned=False,
+            verbose=False,
+        )
+    else:
+        # fetch local prev training state
+        prev_train_state = SemCLIP(
+            model_name=base_model,
+            init_weights=True,
+            load_finetuned=False,
+        )
+        load_path = f"model_ckpts/{train_name}_checkpoint.pth"
+        checkpoint = torch.load(load_path, map_location=DEVICE)
+        
+        # upload local prev training state to HF hub to be compatible with SemCLIP loader for further finetuning
+        prev_train_state.model.load_state_dict(checkpoint['model_state_dict'])
+        prev_train_state.upload_model_to_hf_hub(model_name=train_name, hf_name=HF_USERNAME)
+        
+        # load prev local state to SemCLIP for further finetuning
+        semclip = SemCLIP(
+            model_name=f"{HF_USERNAME}/{train_name}",
+            pool_type=pool_type,
+            projection_dim=projection_dim,
+            device=DEVICE,
+            init_weights=False,
+            load_finetuned=True,
+            verbose=False,
+        )
+        
+    if samclip_training:
+        # if using hybrid CLIP + SemCLIP training, load CLIP model
+        clip_model = CLIPModel.from_pretrained(
+            model_name=base_model,
+        )
+        clip_processor = CLIPProcessor.from_pretrained(
+            model_name=base_model,
+        )
     
     # Load dataset
     dataset = load_dataset(dataset_mapper[data])
@@ -53,7 +95,7 @@ def train_model(
     learning_rate = lr # huggingface trainer default lr: 5e-5
     betas = (0.9, 0.999) # huggingface trainer default betas
     epsilon = 1e-6 # huggingface trainer default epsilon
-    weight_decay = 0.2 # L2 regularization - finetuning CLIP with a small dataset can lead to overfitting so we add L2 regularization
+    weight_decay = 0.001 # L2 regularization 0.2 - finetuning CLIP with a small dataset can lead to overfitting so we add L2 regularization
     # try setting weight_decay to 0.001 (ref: https://github.com/openai/CLIP/issues/150#issuecomment-976076317)
 
     wandb_config = {
@@ -63,7 +105,6 @@ def train_model(
         "weight_decay": weight_decay,
         "num_epochs": num_epochs,
         "batch_size": batch_size,
-        "text_2d_pos_emb": text_pos_emb_2d,
     }
 
     if DEVICE == torch.device("cpu"):
@@ -145,6 +186,11 @@ def train_model(
             except Exception as e:
                 return ValueError(f"error: {e}; images batch being processed: {batch['image']}")
             
+            if samclip_training:
+                clip_outputs = clip_model(pixel_values=image_batch_cv2, input_ids=text_batch)
+                clip_logits_per_image = clip_outputs.logits_per_image
+                logits_per_image = clip_logits_per_image + logits_per_image
+            
             # Compute the loss
             ground_truth = torch.arange(len(logits_per_text), device=DEVICE).long()
             text_loss = loss_fn(logits_per_text, ground_truth) # contrastive loss
@@ -187,7 +233,7 @@ def train_model(
             # Update the progress bar with the current loss
             pbar.set_postfix(Loss=total_loss.item())
 
-    semclip.upload_model_to_hf_hub(model_name=train_name, hf_name='hunarbatra')
+    semclip.upload_model_to_hf_hub(model_name=train_name, hf_name=HF_USERNAME)
 
 
 if __name__ == "__main__":
@@ -203,7 +249,6 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=5e-5, help='Learning rate for training')
     parser.add_argument('--lr_scheduler', type=str, default=None, help='Learning rate scheduler for training; options: "cosine", "reduce"')
     parser.add_argument('--multi_threading', action='store_true', help='Use multi-threading for patches extraction')
-    parser.add_argument('--text_pos_emb_2d', action='store_true', help='Use this flag to enable 2D positional embeddings for text')
     
     args = parser.parse_args()
     
@@ -219,5 +264,4 @@ if __name__ == "__main__":
         lr=args.lr,
         lr_scheduler=args.lr_scheduler,
         multi_threading=args.multi_threading,
-        text_pos_emb_2d=args.text_pos_emb_2d,
     )
