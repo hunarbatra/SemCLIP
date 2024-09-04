@@ -14,7 +14,11 @@ from datasets import load_dataset
 from typing import Optional
 from PIL import Image
 from tqdm import tqdm
+from dotenv import load_dotenv
 
+
+load_dotenv()
+HF_TOKEN = os.getenv("HF_TOKEN")
 
 def compute_zeroshot_and_cosine_scores(preds, logits_per_image, captions_batch, images_names, results, data, model_name):
     for i, pred_idx in enumerate(preds):
@@ -71,28 +75,23 @@ def evaluate_semclip_model(
     pool_type: str = 'attention',
     projection_dim: int = 512,
     multi_threading: bool = False,
-    text_pos_emb_2d: bool = False,
     # evaluation parameters
     data: str = 'COCO-13k',
     batch_size: int = 64,
     data_split: str = 'validation',
     data_subset: Optional[int] = None,
     eval_run_name: str = 'test',
-    use_finetuned: bool = False,
     max_batch: bool = False, #  to get names of all the classes in the dataset as the set of potential text pairings and predict the most probable -- CLIP Zero-shot eval
     verbose: bool = False, # print semclip weights and shape to double check,
 ):
-    # Load SemCLIP model
-    fine_tuned_model = model_name if use_finetuned else None
     semclip = SemCLIP(
         model_name=model_mapper[model_name],
         pool_type=pool_type,
         projection_dim=projection_dim,
         device=DEVICE,
-        text_pos_emb_2d=text_pos_emb_2d, # 1D positional embeddings for text by default
-        ignore_mismatched_sizes=True if model_name.startswith('semclip') else False,
-        fine_tuned_model=fine_tuned_model,
         verbose=verbose,
+        init_weights=False,
+        load_finetuned=True,
     ).to(DEVICE)
     
     # Load the dataset
@@ -123,7 +122,6 @@ def evaluate_semclip_model(
         
         # Convert the batch of PIL images to OpenCV images
         image_batch_cv2 = [pil_to_cv2(img) for img in image_batch_pil]
-        print(f'image_batch_cv2[0].shape: {image_batch_cv2[0].shape}')
         
         with torch.no_grad():
             # Get the image features
@@ -153,8 +151,8 @@ def evaluate_clip_model(
     max_batch: bool = False, #  to get names of all the classes in the dataset as the set of potential text pairings and predict the most probable -- CLIP Zero-shot eval
 ):
     # Load the model and processor
-    model = AutoModel.from_pretrained(model_mapper[model_name]).to(DEVICE)
-    processor = AutoProcessor.from_pretrained(model_mapper[model_name])
+    model = AutoModel.from_pretrained(model_mapper[model_name], token=HF_TOKEN).to(DEVICE)
+    processor = AutoProcessor.from_pretrained(model_mapper[model_name], token=HF_TOKEN)
     
     # Load the dataset
     dataset = load_dataset(dataset_mapper[data])
@@ -190,9 +188,6 @@ def evaluate_clip_model(
         logits_per_image = outputs.logits_per_image
         probs = logits_per_image.softmax(dim=1)
         preds = probs.argmax(dim=1) # get the predicted class index for each image
-        
-        print(f'logits_per_image: {logits_per_image}')
-        print(f'logits_per_image.shape: {logits_per_image.shape}')
                 
         results = compute_zeroshot_and_cosine_scores(preds, logits_per_image, captions_batch, images_names, results, data, model_name)
         curr_results_df = pd.DataFrame(results)
@@ -302,9 +297,6 @@ def evaluate_dinov2_model(
         with torch.no_grad():
             logits_per_image = model(**inputs).logits
         
-        print(f'logits_per_image: {logits_per_image}')
-        print(f'logits_per_image.shape: {logits_per_image.shape}')
-        # probs = logits_per_image.softmax(dim=1)
         preds = logits_per_image.argmax(dim=-1) # get the predicted class index for each image
              
         for i, pred_idx in enumerate(preds):
@@ -340,15 +332,13 @@ if __name__ == '__main__':
     parser.add_argument('--pool_type', type=str, default='attention', help='Pooling type for SemCLIP')
     parser.add_argument('--projection_dim', type=int, default=512, help='Projection dimension for SemCLIP')
     parser.add_argument('--multi_threading', action='store_true', help='Use multi-threading for SemCLIP')
-    parser.add_argument('--text_pos_emb_2d', action='store_true', help='Use 2D positional embeddings for text in SemCLIP')
-    parser.add_argument('--use_finetuned', action='store_true', help='Use fine-tuned SemCLIP model')
     parser.add_argument('--verbose', action='store_true', help='Print model weights and shapes') # print semclip updated layers weights and shape to double check
     parser.add_argument('--cosine', action='store_true', help='Use direct cosine similarity for evaluation')
     parser.add_argument('--max_batch', action='store_true', help='Use the dataset length as the batch size')
     
     args = parser.parse_args()
     
-    if args.model_name == 'clip':
+    if args.model_name.startswith('clip'):
         evaluate_clip_model(
             model_name=args.model_name,
             batch_size=args.batch_size,
@@ -384,13 +374,11 @@ if __name__ == '__main__':
             pool_type=args.pool_type,
             projection_dim=args.projection_dim,
             multi_threading=args.multi_threading,
-            text_pos_emb_2d=args.text_pos_emb_2d,
             data=args.data,
             batch_size=args.batch_size,
             data_split=args.data_split,
             data_subset=args.data_subset,
             eval_run_name=args.eval_run_name,
-            use_finetuned=args.use_finetuned,
             verbose=args.verbose,
             max_batch=args.max_batch,
         )
