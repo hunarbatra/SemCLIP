@@ -9,6 +9,8 @@ from PIL import Image
 from typing import List
 
 
+DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
 def normalize_bbox_coords(bboxes, image_bgr):
     # Normalize the bounding box coordinates
     normalized_bbox_coords = []
